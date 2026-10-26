@@ -1,3 +1,5 @@
+import hashlib
+import sqlite3
 import time
 import numpy as np
 import pandas as pd
@@ -7,15 +9,207 @@ import streamlit as st
 from src.analytics import get_recommendations, process_features
 from src.predictor import train_forecasting_model
 
-# 1. Page Configuration
+# ---------------------------------------------------------
+# 1. Page Configuration & Professional Dark Palette
+# ---------------------------------------------------------
 st.set_page_config(
     page_title="Smart City Traffic Intelligence",
     page_icon="🚦",
     layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+st.markdown(
+    """
+<style>
+    .stApp {
+        background-color: #0b0f19;
+        color: #f3f4f6;
+    }
+    .header-box {
+        background: linear-gradient(90deg, #111827 0%, #1e293b 100%);
+        padding: 16px 24px;
+        border-radius: 10px;
+        border: 1px solid #334155;
+        margin-bottom: 16px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    .search-card {
+        background-color: #111827;
+        padding: 14px 20px;
+        border-radius: 8px;
+        border: 1px solid #374151;
+        margin-bottom: 20px;
+    }
+    .target-badge {
+        background-color: #ef4444;
+        color: white;
+        padding: 3px 8px;
+        border-radius: 4px;
+        font-weight: bold;
+        font-size: 12px;
+    }
+</style>
+""",
+    unsafe_allow_html=True,
 )
 
 
-# 2. Data Ingestion & Model Loading
+# ---------------------------------------------------------
+# 2. SQLite Authentication System (Persistent DB)
+# ---------------------------------------------------------
+def get_db_connection():
+    return sqlite3.connect("traffic_users.db", check_same_thread=False)
+
+
+def hash_password(password: str) -> str:
+    return hashlib.sha256(password.encode()).hexdigest()
+
+
+def init_db():
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS users (
+            badge_id TEXT PRIMARY KEY,
+            password TEXT NOT NULL,
+            name TEXT,
+            dept TEXT,
+            email TEXT
+        )
+    """
+    )
+    # Pre-seed default admin credentials if not existing
+    c.execute("SELECT badge_id FROM users WHERE badge_id = 'officer_admin'")
+    if not c.fetchone():
+        c.execute(
+            "INSERT INTO users VALUES (?, ?, ?, ?, ?)",
+            (
+                "officer_admin",
+                hash_password("traffic123"),
+                "Command Center Admin",
+                "Central Operations HQ",
+                "admin@smartcity.gov",
+            ),
+        )
+    conn.commit()
+    conn.close()
+
+
+def authenticate_user(badge_id: str, password: str):
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute(
+        "SELECT name, dept FROM users WHERE badge_id = ? AND password = ?",
+        (badge_id.strip(), hash_password(password.strip())),
+    )
+    user = c.fetchone()
+    conn.close()
+    return user
+
+
+def register_user(badge_id: str, password: str, name: str, dept: str, email: str):
+    conn = get_db_connection()
+    c = conn.cursor()
+    try:
+        c.execute(
+            "INSERT INTO users VALUES (?, ?, ?, ?, ?)",
+            (
+                badge_id.strip(),
+                hash_password(password.strip()),
+                name.strip(),
+                dept.strip(),
+                email.strip(),
+            ),
+        )
+        conn.commit()
+        conn.close()
+        return True, "Registration completed successfully! Please sign in."
+    except sqlite3.IntegrityError:
+        conn.close()
+        return False, "Badge ID / Username already registered. Please choose another."
+
+
+init_db()
+
+# Session State for User Auth
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+if "username" not in st.session_state:
+    st.session_state.username = ""
+if "officer_name" not in st.session_state:
+    st.session_state.officer_name = ""
+if "searched_junction" not in st.session_state:
+    st.session_state.searched_junction = "J_CBD_01"
+
+
+# ---------------------------------------------------------
+# 3. Agency Authentication Screen (Gatekeeper)
+# ---------------------------------------------------------
+if not st.session_state.authenticated:
+    st.markdown(
+        """
+    <div style="text-align: center; margin-top: 40px; margin-bottom: 25px;">
+        <h2>🚦 Smart City Traffic Intelligence Portal</h2>
+        <p style="color: #94a3b8;">Restricted Access: Traffic Police, Municipal Planners & Authorized Command Centers</p>
+    </div>
+    """,
+        unsafe_allow_html=True,
+    )
+
+    _, auth_center, _ = st.columns([1, 1.8, 1])
+
+    with auth_center:
+        tab_login, tab_register = st.tabs(["🔒 Agency Sign In", "📝 Register New Officer"])
+
+        with tab_login:
+            st.subheader("Officer Authentication")
+            u_badge = st.text_input("Badge ID / Username", value="officer_admin", key="login_badge")
+            u_pwd = st.text_input("Security Key / Password", type="password", value="traffic123", key="login_pwd")
+
+            if st.button("Authorize & Enter Command Center", use_container_width=True):
+                if u_badge and u_pwd:
+                    user_match = authenticate_user(u_badge, u_pwd)
+                    if user_match:
+                        st.session_state.authenticated = True
+                        st.session_state.username = u_badge
+                        st.session_state.officer_name = user_match[0]
+                        st.success("Authorization confirmed.")
+                        st.rerun()
+                    else:
+                        st.error("Invalid Badge ID or Security Key.")
+                else:
+                    st.warning("Please provide all credentials.")
+
+            st.caption("💡 Default Testing Credentials: `officer_admin` | Password: `traffic123`")
+
+        with tab_register:
+            st.subheader("Agency Credentials Enrollment")
+            new_name = st.text_input("Full Official Name", key="reg_name")
+            new_badge = st.text_input("Designated Badge ID / Username", key="reg_badge")
+            new_dept = st.text_input("Control Zone / Sector Division", value="North Traffic Division", key="reg_dept")
+            new_email = st.text_input("Official Govt Email", key="reg_email")
+            new_pwd = st.text_input("Set Security Password", type="password", key="reg_pwd")
+
+            if st.button("Submit Official Registration", use_container_width=True):
+                if new_badge and new_pwd and new_name:
+                    success, msg = register_user(new_badge, new_pwd, new_name, new_dept, new_email)
+                    if success:
+                        st.success(msg)
+                    else:
+                        st.error(msg)
+                else:
+                    st.warning("Full Name, Badge ID, and Password are mandatory.")
+
+    st.stop()
+
+
+# ---------------------------------------------------------
+# 4. Data Ingestion & Model Loading
+# ---------------------------------------------------------
 @st.cache_data
 def load_and_prepare_data():
     raw_df = pd.read_csv("data/traffic_data.csv")
@@ -106,13 +300,46 @@ def assign_pillar_color(score):
     return [42, 157, 143, 220]  # Green: Free Flow
 
 
-# 3. UI Header
-st.title("🚦 Smart City Traffic Intelligence & Dispatch System")
-st.caption(
-    "Live bottleneck detection, incident triage, and automated resource deployment."
-)
+# ---------------------------------------------------------
+# 5. Top Bar: Agency Identity, Search Engine & Target Locator
+# ---------------------------------------------------------
+col_head, col_prof = st.columns([4, 1.2])
+with col_head:
+    st.title("🚦 Smart City Traffic Intelligence & Dispatch System")
+    st.caption("Live bottleneck detection, incident triage, and automated resource deployment.")
+with col_prof:
+    st.write(f"👮 Officer: **{st.session_state.officer_name or st.session_state.username}**")
+    if st.button("Log Out", key="logout_btn", use_container_width=True):
+        st.session_state.authenticated = False
+        st.session_state.username = ""
+        st.session_state.officer_name = ""
+        st.rerun()
 
-# 4. Mode Selection
+# SEARCH ENGINE COMPONENT
+s_col1, s_col2 = st.columns([3.5, 1.2])
+with s_col1:
+    search_selection = st.selectbox(
+        "🔍 Search Area / Monitored Junction to Target and Track:",
+        options=list(JUNCTION_META.keys()),
+        index=list(JUNCTION_META.keys()).index(st.session_state.searched_junction),
+        format_func=lambda x: f"{JUNCTION_META[x]['name']} ({x})",
+        help="Type or select any junction to point the locator arrow and focus telemetry.",
+    )
+    if search_selection != st.session_state.searched_junction:
+        st.session_state.searched_junction = search_selection
+        st.rerun()
+
+with s_col2:
+    st.write(" ")
+    st.write(" ")
+    if st.button("🎯 Focus & Point Arrow", use_container_width=True):
+        st.rerun()
+
+st.divider()
+
+# ---------------------------------------------------------
+# 6. Mode Selection (Sidebar)
+# ---------------------------------------------------------
 st.sidebar.header("🕹️ Mode Selection")
 data_mode = st.sidebar.radio(
     "Choose Data Source:",
@@ -143,6 +370,7 @@ elif data_mode == "Manual Testing Feed":
     selected_jid = st.sidebar.selectbox(
         "Select Junction to Test",
         list(JUNCTION_META.keys()),
+        index=list(JUNCTION_META.keys()).index(st.session_state.searched_junction),
         format_func=lambda x: JUNCTION_META[x]["name"],
     )
 
@@ -217,12 +445,13 @@ if current_slice.empty:
     st.warning("No data points available for current configuration.")
     st.stop()
 
-# 5. ML Forecast Predictions
+# ---------------------------------------------------------
+# 7. ML Forecast Predictions & Top KPIs
+# ---------------------------------------------------------
 current_slice["forecast_next_15m"] = current_slice.apply(
     predict_next_volume, axis=1
 )
 
-# Top KPIs
 col1, col2, col3, col4 = st.columns(4)
 col1.metric(
     "Monitored Vehicle Volume",
@@ -249,36 +478,84 @@ col4.metric(
 
 st.divider()
 
-# Map and Directives
+# ---------------------------------------------------------
+# 8. Interactive 3D Map with Dynamic Downward Arrow Pointer
+# ---------------------------------------------------------
 map_col, action_col = st.columns([3, 2])
+
+# Selected Junction Metadata for Arrow Pointer
+target_meta = JUNCTION_META[st.session_state.searched_junction]
+target_df = current_slice[current_slice["junction_id"] == st.session_state.searched_junction]
+
+# Build pointer dataset pointing straight at the searched location
+arrow_data = pd.DataFrame(
+    [
+        {
+            "latitude": target_meta["lat"],
+            "longitude": target_meta["lon"],
+            "name": target_meta["name"],
+            # High elevation for inverted cone arrow
+            "elevation": 3200,
+        }
+    ]
+)
 
 with map_col:
     st.subheader("🌐 Real-Time 3D Network Map")
+    st.caption(f"Currently tracking pointer beacon at: **{target_meta['name']}**")
+
     current_slice["pillar_color"] = current_slice["rpi_score"].apply(
         assign_pillar_color
     )
 
+    # Focus map camera centered at the searched junction
     view_center = pdk.ViewState(
-        latitude=float(current_slice["latitude"].mean()),
-        longitude=float(current_slice["longitude"].mean()),
-        zoom=11.6,
+        latitude=float(target_meta["lat"]),
+        longitude=float(target_meta["lon"]),
+        zoom=13.0,
         pitch=48,
+        bearing=15,
     )
 
+    # Standard Traffic Volume Pillars
     column_layer = pdk.Layer(
         "ColumnLayer",
         data=current_slice,
         get_position=["longitude", "latitude"],
         get_elevation="rpi_score",
         elevation_scale=35,
-        radius=260,
+        radius=240,
         get_fill_color="pillar_color",
         pickable=True,
         auto_highlight=True,
     )
 
+    # DYNAMIC TARGET ARROW (Inverted Cone pointing straight down onto the junction)
+    arrow_pointer_layer = pdk.Layer(
+        "ConeLayer",
+        data=arrow_data,
+        get_position=["longitude", "latitude"],
+        get_elevation="elevation",
+        elevation_scale=1,
+        radius=200,
+        get_color=[255, 0, 55, 240],  # Neon Red Pointer
+        pickable=False,
+    )
+
+    # Ground Pulsing Halo for Target Junction
+    target_halo_layer = pdk.Layer(
+        "ScatterplotLayer",
+        data=arrow_data,
+        get_position=["longitude", "latitude"],
+        get_radius=420,
+        get_fill_color=[255, 0, 55, 100],
+        get_line_color=[255, 255, 255, 220],
+        line_width_min_pixels=3,
+        pickable=False,
+    )
+
     deck_map = pdk.Deck(
-        layers=[column_layer],
+        layers=[column_layer, arrow_pointer_layer, target_halo_layer],
         initial_view_state=view_center,
         tooltip={
             "html": (
@@ -292,8 +569,25 @@ with map_col:
     )
     st.pydeck_chart(deck_map)
 
+# ---------------------------------------------------------
+# 9. Operational Dispatch Directives & Signal Controls
+# ---------------------------------------------------------
 with action_col:
     st.subheader("📋 Operational Dispatch Directives")
+
+    # Quick highlighted panel for the searched junction
+    if not target_df.empty:
+        t_row = target_df.iloc[0]
+        st.markdown(
+            f"""
+        <div style="background: #1e293b; border-left: 4px solid #ef4444; padding: 10px 14px; border-radius: 6px; margin-bottom: 12px;">
+            <b>🎯 TARGETED SECTOR:</b> {t_row['junction_name']}<br>
+            <span style="font-size: 13px; color: #cbd5e1;">Flow: <b>{t_row['vehicle_count']}/{t_row['road_capacity']} veh</b> | RPI: <b>{t_row['rpi_score']}</b> | Forecast: <b>{t_row['forecast_next_15m']} veh</b></span>
+        </div>
+        """,
+            unsafe_allow_html=True,
+        )
+
     prioritized_corridors = current_slice.sort_values(
         by="rpi_score", ascending=False
     )
@@ -305,9 +599,10 @@ with action_col:
             else ("🟡 ELEVATED" if corridor["rpi_score"] >= 40 else "🟢 OPTIMAL")
         )
 
-        with st.expander(
-            f"{status_tag} | {corridor['junction_name']} (RPI: {corridor['rpi_score']})"
-        ):
+        is_focused = corridor["junction_id"] == st.session_state.searched_junction
+        expander_title = f"{status_tag} | {corridor['junction_name']} (RPI: {corridor['rpi_score']}) {'📍 [FOCUSED]' if is_focused else ''}"
+
+        with st.expander(expander_title, expanded=is_focused):
             c_flow, c_pred = st.columns(2)
             c_flow.metric(
                 "Current Flow",
@@ -331,7 +626,9 @@ with action_col:
             for act in get_recommendations(corridor):
                 st.markdown(f"- {act}")
 
-# Polling loop for live automated simulation
+# ---------------------------------------------------------
+# 10. Polling Loop for Live Automated Simulation
+# ---------------------------------------------------------
 if data_mode == "Automated Live Feed" and auto_refresh:
     time.sleep(refresh_rate)
     st.rerun()
