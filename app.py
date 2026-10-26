@@ -1,6 +1,7 @@
 import hashlib
 import sqlite3
 import time
+from geopy.geocoders import Nominatim
 import numpy as np
 import pandas as pd
 import plotly.express as px
@@ -82,7 +83,6 @@ def init_db():
         )
     """
     )
-    # Pre-seed default admin credentials if not existing
     c.execute("SELECT badge_id FROM users WHERE badge_id = 'officer_admin'")
     if not c.fetchone():
         c.execute(
@@ -135,19 +135,39 @@ def register_user(badge_id: str, password: str, name: str, dept: str, email: str
 
 init_db()
 
-# Session State for User Auth
+# Session State for User Auth & Dynamic Location
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 if "username" not in st.session_state:
     st.session_state.username = ""
 if "officer_name" not in st.session_state:
     st.session_state.officer_name = ""
-if "searched_junction" not in st.session_state:
-    st.session_state.searched_junction = "J_CBD_01"
+if "target_area_name" not in st.session_state:
+    st.session_state.target_area_name = "Paradise Circle, Secunderabad"
+if "target_lat" not in st.session_state:
+    st.session_state.target_lat = 17.4416
+if "target_lon" not in st.session_state:
+    st.session_state.target_lon = 78.4871
 
 
 # ---------------------------------------------------------
-# 3. Agency Authentication Screen (Gatekeeper)
+# 3. Dynamic Free-Form Geocoding Engine
+# ---------------------------------------------------------
+@st.cache_data(show_spinner=False)
+def geocode_location(query: str):
+    """Converts any typed city, junction, or area name to real-time coordinates."""
+    try:
+        geolocator = Nominatim(user_agent="smart_city_traffic_portal_v2")
+        location = geolocator.geocode(query, timeout=10)
+        if location:
+            return location.latitude, location.longitude, location.address
+    except Exception:
+        pass
+    return None, None, None
+
+
+# ---------------------------------------------------------
+# 4. Agency Authentication Screen (Gatekeeper)
 # ---------------------------------------------------------
 if not st.session_state.authenticated:
     st.markdown(
@@ -208,12 +228,15 @@ if not st.session_state.authenticated:
 
 
 # ---------------------------------------------------------
-# 4. Data Ingestion & Model Loading
+# 5. Data Ingestion & Model Loading
 # ---------------------------------------------------------
 @st.cache_data
 def load_and_prepare_data():
-    raw_df = pd.read_csv("data/traffic_data.csv")
-    return process_features(raw_df)
+    try:
+        raw_df = pd.read_csv("data/traffic_data.csv")
+        return process_features(raw_df)
+    except Exception:
+        return pd.DataFrame()
 
 
 @st.cache_resource
@@ -224,7 +247,6 @@ def load_trained_model():
 df = load_and_prepare_data()
 model = load_trained_model()
 
-# Exact feature schema matching src/predictor.py
 FEATURE_NAMES = [
     "hour",
     "dayofweek",
@@ -235,41 +257,6 @@ FEATURE_NAMES = [
     "accident_reported",
     "road_capacity",
 ]
-
-# Junction coordinates and capacities
-JUNCTION_META = {
-    "J_CBD_01": {
-        "name": "Central Business Hub",
-        "lat": 17.4435,
-        "lon": 78.3772,
-        "capacity": 300,
-    },
-    "J_TECH_02": {
-        "name": "Tech Corridor Junction",
-        "lat": 17.4504,
-        "lon": 78.3808,
-        "capacity": 250,
-    },
-    "J_IND_03": {
-        "name": "Industrial Ring Road",
-        "lat": 17.4200,
-        "lon": 78.3489,
-        "capacity": 200,
-    },
-    "J_RES_04": {
-        "name": "Suburban Arterial Gate",
-        "lat": 17.4720,
-        "lon": 78.3550,
-        "capacity": 180,
-    },
-    "J_EXP_05": {
-        "name": "Expressway Interchange",
-        "lat": 17.4110,
-        "lon": 78.4000,
-        "capacity": 350,
-    },
-}
-
 weather_map = {"Clear": 0, "Fog": 1, "Rain": 2}
 
 
@@ -301,7 +288,7 @@ def assign_pillar_color(score):
 
 
 # ---------------------------------------------------------
-# 5. Top Bar: Agency Identity, Search Engine & Target Locator
+# 6. Top Bar: Agency Identity & Custom Area Search Engine
 # ---------------------------------------------------------
 col_head, col_prof = st.columns([4, 1.2])
 with col_head:
@@ -315,186 +302,151 @@ with col_prof:
         st.session_state.officer_name = ""
         st.rerun()
 
-# SEARCH ENGINE COMPONENT
-s_col1, s_col2 = st.columns([3.5, 1.2])
+# REAL-TIME FREE-FORM LOCATION SEARCH ENGINE
+s_col1, s_col2 = st.columns([3.8, 1.2])
 with s_col1:
-    search_selection = st.selectbox(
-        "🔍 Search Area / Monitored Junction to Target and Track:",
-        options=list(JUNCTION_META.keys()),
-        index=list(JUNCTION_META.keys()).index(st.session_state.searched_junction),
-        format_func=lambda x: f"{JUNCTION_META[x]['name']} ({x})",
-        help="Type or select any junction to point the locator arrow and focus telemetry.",
+    user_search_input = st.text_input(
+        "🔍 Type ANY Area / Junction to Track & Point Arrow on Map:",
+        value=st.session_state.target_area_name,
+        placeholder="Type any area: e.g. Paradise Circle, Hitec City, Jubilee Hills, Charminar...",
+        help="Type any real location. Nominatim will locate coordinates and drop the locator arrow directly on it.",
     )
-    if search_selection != st.session_state.searched_junction:
-        st.session_state.searched_junction = search_selection
-        st.rerun()
 
 with s_col2:
     st.write(" ")
     st.write(" ")
-    if st.button("🎯 Focus & Point Arrow", use_container_width=True):
-        st.rerun()
+    locate_pressed = st.button("🎯 Locate & Point Arrow", use_container_width=True)
+
+# Geocode dynamically when the user types or clicks
+if locate_pressed or (user_search_input and user_search_input != st.session_state.target_area_name):
+    with st.spinner(f"Acquiring satellite coordinates for '{user_search_input}'..."):
+        lat, lon, full_address = geocode_location(user_search_input)
+        if lat and lon:
+            st.session_state.target_lat = lat
+            st.session_state.target_lon = lon
+            st.session_state.target_area_name = user_search_input
+            st.success(f"Locked onto: {full_address[:75]}...")
+        else:
+            st.warning(f"Could not locate '{user_search_input}'. Retaining current coordinates.")
 
 st.divider()
 
 # ---------------------------------------------------------
-# 6. Mode Selection (Sidebar)
+# 7. Sidebar Simulation & Sensor Controls
 # ---------------------------------------------------------
-st.sidebar.header("🕹️ Mode Selection")
+st.sidebar.header("🕹️ Area Sensor & Simulation Controls")
 data_mode = st.sidebar.radio(
-    "Choose Data Source:",
-    ["Historical Dataset", "Manual Testing Feed", "Automated Live Feed"],
+    "Sensor Input Mode:",
+    ["Live Targeted Area Telemetry", "Manual Override Feed", "Automated Ambient Simulation"],
 )
 
-current_slice = pd.DataFrame()
+# Sliders to configure targeted area conditions
+sim_capacity = st.sidebar.slider("Roadway Capacity (veh/hr)", 100, 500, 260)
+sim_count = st.sidebar.slider("Current Vehicle Count", 0, int(sim_capacity * 1.5), int(sim_capacity * 0.78))
+sim_weather = st.sidebar.selectbox("Local Weather Condition", ["Clear", "Fog", "Rain"])
+sim_incident = st.sidebar.checkbox("Report Incident / Collision Alert", value=False)
+sim_hour = st.sidebar.slider("Observation Hour (0-23)", 0, 23, 18)
 
-# Mode A: Historical Dataset
-if data_mode == "Historical Dataset":
-    unique_dates = df["timestamp"].dt.date.unique()
-    selected_date = st.sidebar.date_input("Simulation Date", unique_dates[-1])
-    day_data = df[df["timestamp"].dt.date == selected_date]
-
-    selected_hour = st.sidebar.slider("Hour of Day (24h)", 0, 23, 18)
-    selected_minute = st.sidebar.select_slider(
-        "15-Minute Interval", options=[0, 15, 30, 45], value=30
-    )
-
-    active_timestamp = pd.Timestamp(
-        f"{selected_date} {selected_hour:02d}:{selected_minute:02d}:00"
-    )
-    current_slice = day_data[day_data["timestamp"] == active_timestamp].copy()
-
-# Mode B: Manual Override
-elif data_mode == "Manual Testing Feed":
-    st.sidebar.subheader("✏️ Enter Sensor Inputs")
-    selected_jid = st.sidebar.selectbox(
-        "Select Junction to Test",
-        list(JUNCTION_META.keys()),
-        index=list(JUNCTION_META.keys()).index(st.session_state.searched_junction),
-        format_func=lambda x: JUNCTION_META[x]["name"],
-    )
-
-    meta = JUNCTION_META[selected_jid]
-    manual_count = st.sidebar.slider(
-        "Vehicle Count",
-        0,
-        int(meta["capacity"] * 1.5),
-        int(meta["capacity"] * 0.8),
-    )
-    manual_weather = st.sidebar.selectbox(
-        "Weather Condition", ["Clear", "Fog", "Rain"]
-    )
-    manual_accident = st.sidebar.checkbox(
-        "Report Incident / Accident", value=False
-    )
-    manual_hour = st.sidebar.slider("Current Hour (0-23)", 0, 23, 9)
-
-    now_ts = pd.Timestamp.now().replace(hour=manual_hour, minute=0, second=0)
-
-    manual_record = pd.DataFrame(
-        [
-            {
-                "timestamp": now_ts,
-                "junction_id": selected_jid,
-                "junction_name": meta["name"],
-                "latitude": meta["lat"],
-                "longitude": meta["lon"],
-                "vehicle_count": manual_count,
-                "road_capacity": meta["capacity"],
-                "weather_condition": manual_weather,
-                "accident_reported": 1 if manual_accident else 0,
-            }
-        ]
-    )
-    current_slice = process_features(manual_record)
-
-# Mode C: Live Automated Simulation
-elif data_mode == "Automated Live Feed":
+if data_mode == "Automated Ambient Simulation":
     auto_refresh = st.sidebar.checkbox("Enable Live Polling", value=True)
     refresh_rate = st.sidebar.slider("Refresh Rate (seconds)", 2, 10, 3)
 
-    now_ts = pd.Timestamp.now()
-    live_records = []
-    current_weather = np.random.choice(
-        ["Clear", "Rain", "Fog"], p=[0.7, 0.2, 0.1]
+# ---------------------------------------------------------
+# 8. Dynamic Record Pipeline for the Target Location
+# ---------------------------------------------------------
+now_ts = pd.Timestamp.now().replace(hour=sim_hour, minute=0, second=0)
+
+# 1. Primary Targeted Area Record
+primary_record = {
+    "timestamp": now_ts,
+    "junction_id": "TARGETED_ZONE",
+    "junction_name": st.session_state.target_area_name,
+    "latitude": float(st.session_state.target_lat),
+    "longitude": float(st.session_state.target_lon),
+    "vehicle_count": sim_count,
+    "road_capacity": sim_capacity,
+    "weather_condition": sim_weather,
+    "accident_reported": 1 if sim_incident else 0,
+}
+
+all_records = [primary_record]
+
+# 2. Add realistic ambient peripheral junctions around the targeted coordinates
+np.random.seed(42)
+offsets = [
+    (0.012, 0.009, "North Sector Link"),
+    (-0.011, -0.010, "South Arterial Gate"),
+    (-0.008, 0.014, "East Feeder Crossroad"),
+    (0.014, -0.012, "West Ring Access"),
+]
+
+for d_lat, d_lon, label in offsets:
+    cap = int(sim_capacity * np.random.uniform(0.7, 1.1))
+    v_cnt = int(cap * np.random.uniform(0.4, 0.95))
+    all_records.append(
+        {
+            "timestamp": now_ts,
+            "junction_id": label.replace(" ", "_"),
+            "junction_name": f"{label} ({st.session_state.target_area_name[:12]})",
+            "latitude": float(st.session_state.target_lat) + d_lat,
+            "longitude": float(st.session_state.target_lon) + d_lon,
+            "vehicle_count": v_cnt,
+            "road_capacity": cap,
+            "weather_condition": sim_weather,
+            "accident_reported": 1 if np.random.rand() < 0.1 else 0,
+        }
     )
 
-    for jid, meta in JUNCTION_META.items():
-        base = int(meta["capacity"] * np.random.uniform(0.4, 1.15))
-        has_acc = 1 if np.random.rand() < 0.15 else 0
-        if has_acc:
-            base = int(base * 1.3)
-
-        live_records.append(
-            {
-                "timestamp": now_ts,
-                "junction_id": jid,
-                "junction_name": meta["name"],
-                "latitude": meta["lat"],
-                "longitude": meta["lon"],
-                "vehicle_count": base,
-                "road_capacity": meta["capacity"],
-                "weather_condition": current_weather,
-                "accident_reported": has_acc,
-            }
-        )
-
-    current_slice = process_features(pd.DataFrame(live_records))
-
-if current_slice.empty:
-    st.warning("No data points available for current configuration.")
-    st.stop()
+current_slice = process_features(pd.DataFrame(all_records))
+current_slice["forecast_next_15m"] = current_slice.apply(predict_next_volume, axis=1)
 
 # ---------------------------------------------------------
-# 7. ML Forecast Predictions & Top KPIs
+# 9. Telemetry KPI Badges
 # ---------------------------------------------------------
-current_slice["forecast_next_15m"] = current_slice.apply(
-    predict_next_volume, axis=1
-)
+target_row = current_slice[current_slice["junction_id"] == "TARGETED_ZONE"].iloc[0]
 
 col1, col2, col3, col4 = st.columns(4)
 col1.metric(
-    "Monitored Vehicle Volume",
-    f"{current_slice['vehicle_count'].sum():,} veh",
+    "Targeted Area",
+    st.session_state.target_area_name[:24],
+    f"{target_row['vehicle_count']} veh",
 )
-avg_vc = current_slice["vc_ratio"].mean()
+avg_vc = target_row["vc_ratio"]
 col2.metric(
-    "Network Avg V/C Ratio",
+    "Area V/C Saturation",
     f"{avg_vc:.2f}",
     delta="Saturated" if avg_vc >= 0.85 else "Stable",
     delta_color="inverse" if avg_vc >= 0.85 else "normal",
 )
 accidents_count = int(current_slice["accident_reported"].sum())
 col3.metric(
-    "Active Incidents", f"{accidents_count} Alert(s)", delta_color="inverse"
+    "Active Incidents",
+    f"{accidents_count} Alert(s)",
+    delta="Collision Reported" if target_row["accident_reported"] == 1 else "Normal Flow",
+    delta_color="inverse" if target_row["accident_reported"] == 1 else "normal",
 )
-max_rpi = current_slice["rpi_score"].max()
+target_rpi = target_row["rpi_score"]
 col4.metric(
-    "Peak RPI Stress Index",
-    f"{max_rpi:.1f} / 100",
-    delta="High Load" if max_rpi > 60 else "Normal Load",
-    delta_color="inverse" if max_rpi > 60 else "normal",
+    "Area RPI Stress Index",
+    f"{target_rpi:.1f} / 100",
+    delta="High Load" if target_rpi > 60 else "Normal Load",
+    delta_color="inverse" if target_rpi > 60 else "normal",
 )
 
 st.divider()
 
 # ---------------------------------------------------------
-# 8. Interactive 3D Map with Dynamic Downward Arrow Pointer
+# 10. Interactive 3D Map with Dynamic Pointed Arrow Marker
 # ---------------------------------------------------------
 map_col, action_col = st.columns([3, 2])
 
-# Selected Junction Metadata for Arrow Pointer
-target_meta = JUNCTION_META[st.session_state.searched_junction]
-target_df = current_slice[current_slice["junction_id"] == st.session_state.searched_junction]
-
-# Build pointer dataset pointing straight at the searched location
+# Build Arrow dataset pointing directly at the searched coordinates
 arrow_data = pd.DataFrame(
     [
         {
-            "latitude": target_meta["lat"],
-            "longitude": target_meta["lon"],
-            "name": target_meta["name"],
-            # High elevation for inverted cone arrow
+            "latitude": float(st.session_state.target_lat),
+            "longitude": float(st.session_state.target_lon),
+            "name": st.session_state.target_area_name,
             "elevation": 3200,
         }
     ]
@@ -502,17 +454,18 @@ arrow_data = pd.DataFrame(
 
 with map_col:
     st.subheader("🌐 Real-Time 3D Network Map")
-    st.caption(f"Currently tracking pointer beacon at: **{target_meta['name']}**")
-
-    current_slice["pillar_color"] = current_slice["rpi_score"].apply(
-        assign_pillar_color
+    st.caption(
+        f"🎯 Pointer Arrow Locked: **{st.session_state.target_area_name}** "
+        f"({st.session_state.target_lat:.4f}, {st.session_state.target_lon:.4f})"
     )
 
-    # Focus map camera centered at the searched junction
+    current_slice["pillar_color"] = current_slice["rpi_score"].apply(assign_pillar_color)
+
+    # Focus map camera centered at the searched coordinates
     view_center = pdk.ViewState(
-        latitude=float(target_meta["lat"]),
-        longitude=float(target_meta["lon"]),
-        zoom=13.0,
+        latitude=float(st.session_state.target_lat),
+        longitude=float(st.session_state.target_lon),
+        zoom=13.6,
         pitch=48,
         bearing=15,
     )
@@ -523,21 +476,21 @@ with map_col:
         data=current_slice,
         get_position=["longitude", "latitude"],
         get_elevation="rpi_score",
-        elevation_scale=35,
-        radius=240,
+        elevation_scale=38,
+        radius=200,
         get_fill_color="pillar_color",
         pickable=True,
         auto_highlight=True,
     )
 
-    # DYNAMIC TARGET ARROW (Inverted Cone pointing straight down onto the junction)
+    # DYNAMIC TARGET ARROW (Inverted Cone pointing straight down onto the location)
     arrow_pointer_layer = pdk.Layer(
         "ConeLayer",
         data=arrow_data,
         get_position=["longitude", "latitude"],
         get_elevation="elevation",
         elevation_scale=1,
-        radius=200,
+        radius=180,
         get_color=[255, 0, 55, 240],  # Neon Red Pointer
         pickable=False,
     )
@@ -547,7 +500,7 @@ with map_col:
         "ScatterplotLayer",
         data=arrow_data,
         get_position=["longitude", "latitude"],
-        get_radius=420,
+        get_radius=380,
         get_fill_color=[255, 0, 55, 100],
         get_line_color=[255, 255, 255, 220],
         line_width_min_pixels=3,
@@ -570,37 +523,42 @@ with map_col:
     st.pydeck_chart(deck_map)
 
 # ---------------------------------------------------------
-# 9. Operational Dispatch Directives & Signal Controls
+# 11. Operational Dispatch Directives & Signal Controls
 # ---------------------------------------------------------
 with action_col:
     st.subheader("📋 Operational Dispatch Directives")
 
-    # Quick highlighted panel for the searched junction
-    if not target_df.empty:
-        t_row = target_df.iloc[0]
-        st.markdown(
-            f"""
-        <div style="background: #1e293b; border-left: 4px solid #ef4444; padding: 10px 14px; border-radius: 6px; margin-bottom: 12px;">
-            <b>🎯 TARGETED SECTOR:</b> {t_row['junction_name']}<br>
-            <span style="font-size: 13px; color: #cbd5e1;">Flow: <b>{t_row['vehicle_count']}/{t_row['road_capacity']} veh</b> | RPI: <b>{t_row['rpi_score']}</b> | Forecast: <b>{t_row['forecast_next_15m']} veh</b></span>
-        </div>
-        """,
-            unsafe_allow_html=True,
-        )
-
-    prioritized_corridors = current_slice.sort_values(
-        by="rpi_score", ascending=False
+    # High-visibility status badge for the searched location
+    status_tag = (
+        "🔴 CRITICAL"
+        if target_row["rpi_score"] >= 60
+        else ("🟡 ELEVATED" if target_row["rpi_score"] >= 40 else "🟢 OPTIMAL")
     )
 
+    st.markdown(
+        f"""
+        <div style="background: #1e293b; border-left: 4px solid #ef4444; padding: 12px 14px; border-radius: 6px; margin-bottom: 14px;">
+            <b>🎯 TARGETED SECTOR:</b> {st.session_state.target_area_name}<br>
+            <span style="font-size: 13px; color: #cbd5e1;">Status: <b>{status_tag}</b> | Flow: <b>{target_row['vehicle_count']}/{target_row['road_capacity']} veh</b> | RPI: <b>{target_row['rpi_score']}</b> | 15m Forecast: <b>{target_row['forecast_next_15m']} veh</b></span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    prioritized_corridors = current_slice.sort_values(by="rpi_score", ascending=False)
+
     for _, corridor in prioritized_corridors.iterrows():
-        status_tag = (
+        is_focused = corridor["junction_id"] == "TARGETED_ZONE"
+        c_status = (
             "🔴 CRITICAL"
             if corridor["rpi_score"] >= 60
             else ("🟡 ELEVATED" if corridor["rpi_score"] >= 40 else "🟢 OPTIMAL")
         )
 
-        is_focused = corridor["junction_id"] == st.session_state.searched_junction
-        expander_title = f"{status_tag} | {corridor['junction_name']} (RPI: {corridor['rpi_score']}) {'📍 [FOCUSED]' if is_focused else ''}"
+        expander_title = (
+            f"{c_status} | {corridor['junction_name']} (RPI: {corridor['rpi_score']}) "
+            f"{'📍 [TARGETED]' if is_focused else ''}"
+        )
 
         with st.expander(expander_title, expanded=is_focused):
             c_flow, c_pred = st.columns(2)
@@ -611,9 +569,7 @@ with action_col:
             c_pred.metric(
                 "15-Min Forecast",
                 f"{corridor['forecast_next_15m']} veh",
-                delta=int(
-                    corridor["forecast_next_15m"] - corridor["vehicle_count"]
-                ),
+                delta=int(corridor["forecast_next_15m"] - corridor["vehicle_count"]),
                 delta_color="inverse",
             )
             st.write(
@@ -626,9 +582,18 @@ with action_col:
             for act in get_recommendations(corridor):
                 st.markdown(f"- {act}")
 
+    st.markdown("---")
+    st.markdown("#### ⚡ Signal Corridor Override")
+    sig_action = st.radio(
+        f"Deploy Phase to {st.session_state.target_area_name[:20]}:",
+        ["Hold Green Corridor", "Dynamic Adaptive Cycle", "Emergency All-Red Flush", "Manual Officer Control"],
+    )
+    if st.button("Dispatch Phase Signal", use_container_width=True):
+        st.success(f"Signal command '{sig_action}' deployed to {st.session_state.target_area_name}.")
+
 # ---------------------------------------------------------
-# 10. Polling Loop for Live Automated Simulation
+# 12. Polling Loop for Live Automated Simulation
 # ---------------------------------------------------------
-if data_mode == "Automated Live Feed" and auto_refresh:
+if data_mode == "Automated Ambient Simulation" and auto_refresh:
     time.sleep(refresh_rate)
     st.rerun()

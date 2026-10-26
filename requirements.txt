@@ -1,6 +1,7 @@
 streamlit
 pandas
 numpy
-scikit-learn
-pydeck
 plotly
+pydeck
+geopy
+scikit-learn
