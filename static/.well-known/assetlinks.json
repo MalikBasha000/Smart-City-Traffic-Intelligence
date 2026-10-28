@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.malikbasha.traffic",
+      "sha256_cert_fingerprints": [
+        "42:9D:C1:90:F3:40:3C:DD:B8:D6:DA:0C:F5:D9:24:13:B7:43:45:75:0B:86:9D:ED:F5:28:E9:18:08:D8:1C:F7"
+      ]
+    }
+  }
+]
