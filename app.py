@@ -23,10 +23,91 @@ st.set_page_config(
 st.markdown(
     """
 <style>
+    /* Dark background across entire viewport */
     .stApp {
-        background-color: #0b0f19;
-        color: #f3f4f6;
+        background-color: #0b0f19 !important;
+        color: #f3f4f6 !important;
     }
+
+    /* Prevent header clipping on mobile screens */
+    .block-container {
+        padding-top: 1.8rem !important;
+        padding-bottom: 3rem !important;
+    }
+
+    /* Remove white backgrounds from input boxes (Inputs, TextAreas, Selectboxes) */
+    div[data-baseweb="input"],
+    div[data-baseweb="base-input"] {
+        background-color: #161f30 !important;
+        border: 1px solid #334155 !important;
+        border-radius: 8px !important;
+    }
+    div[data-baseweb="input"] input,
+    input.st-bc {
+        background-color: transparent !important;
+        color: #ffffff !important;
+        font-size: 15px !important;
+        font-weight: 500 !important;
+    }
+    div[data-baseweb="input"]:focus-within {
+        border-color: #ef4444 !important;
+        box-shadow: 0 0 0 1px #ef4444 !important;
+    }
+
+    /* High contrast text on all field labels and captions */
+    label, p, span, h1, h2, h3, h4, small {
+        color: #e2e8f0 !important;
+    }
+
+    /* Red command-center primary action buttons */
+    .stButton > button {
+        background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%) !important;
+        color: #ffffff !important;
+        font-weight: 600 !important;
+        font-size: 15px !important;
+        border: 1px solid #dc2626 !important;
+        border-radius: 8px !important;
+        padding: 0.6rem 1.2rem !important;
+        box-shadow: 0 4px 12px rgba(239, 68, 68, 0.35) !important;
+        transition: all 0.2s ease-in-out !important;
+    }
+    .stButton > button:hover {
+        background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%) !important;
+        box-shadow: 0 6px 16px rgba(239, 68, 68, 0.5) !important;
+    }
+
+    /* Tabs styling matching dark command theme */
+    button[data-baseweb="tab"] {
+        color: #94a3b8 !important;
+    }
+    button[data-baseweb="tab"][aria-selected="true"] {
+        color: #ef4444 !important;
+        border-bottom-color: #ef4444 !important;
+    }
+
+    /* Metric cards & info banners */
+    .metric-card {
+        background-color: #111827 !important;
+        border: 1px solid #374151 !important;
+        border-radius: 8px !important;
+        padding: 14px !important;
+        text-align: center !important;
+    }
+    .stAlert {
+        background-color: #111827 !important;
+        color: #f3f4f6 !important;
+        border: 1px solid #374151 !important;
+        border-radius: 8px !important;
+    }
+    code {
+        color: #fca5a5 !important;
+        background-color: #1e293b !important;
+        border: 1px solid #334155 !important;
+        border-radius: 4px !important;
+        padding: 2px 6px !important;
+    }
+    
+    /* Header box */
     .header-box {
         background: linear-gradient(90deg, #111827 0%, #1e293b 100%);
         padding: 16px 24px;
@@ -36,21 +117,6 @@ st.markdown(
         display: flex;
         justify-content: space-between;
         align-items: center;
-    }
-    .search-card {
-        background-color: #111827;
-        padding: 14px 20px;
-        border-radius: 8px;
-        border: 1px solid #374151;
-        margin-bottom: 20px;
-    }
-    .target-badge {
-        background-color: #ef4444;
-        color: white;
-        padding: 3px 8px;
-        border-radius: 4px;
-        font-weight: bold;
-        font-size: 12px;
     }
 </style>
 """,
@@ -172,7 +238,7 @@ def geocode_location(query: str):
 if not st.session_state.authenticated:
     st.markdown(
         """
-    <div style="text-align: center; margin-top: 40px; margin-bottom: 25px;">
+    <div style="text-align: center; margin-top: 20px; margin-bottom: 25px;">
         <h2>🚦 Smart City Traffic Intelligence Portal</h2>
         <p style="color: #94a3b8;">Restricted Access: Traffic Police, Municipal Planners & Authorized Command Centers</p>
     </div>
