@@ -37,7 +37,7 @@ st.markdown(
         padding-bottom: 3rem !important;
     }
 
-    /* Remove white backgrounds from input boxes (Inputs, TextAreas, Selectboxes) */
+    /* Remove white backgrounds from input boxes */
     div[data-baseweb="input"],
     div[data-baseweb="base-input"] {
         background-color: #161f30 !important;
@@ -151,7 +151,6 @@ def init_db():
         )
     """
     )
-    # Incident photo triage logs table
     c.execute(
         """
         CREATE TABLE IF NOT EXISTS field_incidents (
@@ -245,8 +244,6 @@ if "target_lat" not in st.session_state:
     st.session_state.target_lat = 17.4416
 if "target_lon" not in st.session_state:
     st.session_state.target_lon = 78.4871
-if "camera_active" not in st.session_state:
-    st.session_state.camera_active = False
 
 
 # ---------------------------------------------------------
@@ -254,7 +251,6 @@ if "camera_active" not in st.session_state:
 # ---------------------------------------------------------
 @st.cache_data(show_spinner=False)
 def geocode_location(query: str):
-    """Converts any typed city, junction, or area name to real-time coordinates."""
     try:
         geolocator = Nominatim(user_agent="smart_city_traffic_portal_v2")
         location = geolocator.geocode(query, timeout=10)
@@ -267,7 +263,6 @@ def geocode_location(query: str):
 
 @st.cache_data(show_spinner=False)
 def reverse_geocode(lat: float, lon: float):
-    """Converts GPS coordinates back into a human-readable area name."""
     try:
         geolocator = Nominatim(user_agent="smart_city_traffic_portal_v2")
         location = geolocator.reverse(f"{lat}, {lon}", timeout=10)
@@ -302,7 +297,7 @@ if not st.session_state.authenticated:
             u_badge = st.text_input("Badge ID / Username", value="officer_admin", key="login_badge")
             u_pwd = st.text_input("Security Key / Password", type="password", value="traffic123", key="login_pwd")
 
-            if st.button("Authorize & Enter Command Center", use_container_width=True):
+            if st.button("Authorize & Enter Command Center", key="btn_auth_login", use_container_width=True):
                 if u_badge and u_pwd:
                     user_match = authenticate_user(u_badge, u_pwd)
                     if user_match:
@@ -326,7 +321,7 @@ if not st.session_state.authenticated:
             new_email = st.text_input("Official Govt Email", key="reg_email")
             new_pwd = st.text_input("Set Security Password", type="password", key="reg_pwd")
 
-            if st.button("Submit Official Registration", use_container_width=True):
+            if st.button("Submit Official Registration", key="btn_auth_reg", use_container_width=True):
                 if new_badge and new_pwd and new_name:
                     success, msg = register_user(new_badge, new_pwd, new_name, new_dept, new_email)
                     if success:
@@ -373,7 +368,6 @@ weather_map = {"Clear": 0, "Fog": 1, "Rain": 2}
 
 
 def predict_next_volume(row):
-    """Predict next 15-minute volume using DataFrame to preserve feature names."""
     try:
         input_data = {
             "hour": [int(row["hour"])],
@@ -393,10 +387,10 @@ def predict_next_volume(row):
 
 def assign_pillar_color(score):
     if score >= 60:
-        return [230, 57, 70, 220]  # Red: Critical
+        return [230, 57, 70, 220]
     elif score >= 40:
-        return [244, 162, 97, 220]  # Amber: Elevated
-    return [42, 157, 143, 220]  # Green: Free Flow
+        return [244, 162, 97, 220]
+    return [42, 157, 143, 220]
 
 
 # ---------------------------------------------------------
@@ -421,32 +415,29 @@ with s_col1:
         "🔍 Type ANY Area / Junction to Track & Point Arrow on Map:",
         value=st.session_state.target_area_name,
         placeholder="Type any area: e.g. Paradise Circle, Hitec City, Jubilee Hills, Charminar...",
-        help="Type any real location. Nominatim will locate coordinates and drop the locator arrow directly on it.",
+        key="search_area_box",
     )
 
 with s_col2:
-    st.write(" ")
-    st.write(" ")
-    locate_pressed = st.button("🎯 Locate & Point Arrow", use_container_width=True)
+    st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+    locate_pressed = st.button("🎯 Locate Target", key="locate_target_btn", use_container_width=True)
 
 with s_col3:
-    st.write(" ")
-    st.write(" ")
-    use_gps_pressed = st.button("📍 Sync My GPS", help="Use device hardware GPS coordinates", use_container_width=True)
+    st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+    use_gps_pressed = st.button("📍 Sync My GPS", key="sync_gps_btn", use_container_width=True)
 
-# Hardware GPS Receiver logic via Query Parameters
-query_params = st.query_params
-if "gps_lat" in query_params and "gps_lon" in query_params:
+# Hardware GPS Receiver logic
+if "gps_lat" in st.query_params and "gps_lon" in st.query_params:
     try:
-        gps_lat = float(query_params["gps_lat"])
-        gps_lon = float(query_params["gps_lon"])
+        gps_lat = float(st.query_params["gps_lat"])
+        gps_lon = float(st.query_params["gps_lon"])
         if abs(gps_lat - st.session_state.target_lat) > 0.0001 or abs(gps_lon - st.session_state.target_lon) > 0.0001:
             st.session_state.target_lat = gps_lat
             st.session_state.target_lon = gps_lon
             resolved_address = reverse_geocode(gps_lat, gps_lon)
             st.session_state.target_area_name = resolved_address
-            # Clear params to avoid loop
-            st.query_params.clear()
+            del st.query_params["gps_lat"]
+            del st.query_params["gps_lon"]
             st.rerun()
     except Exception:
         pass
@@ -472,25 +463,22 @@ if use_gps_pressed:
                 { enableHighAccuracy: true, timeout: 10000 }
             );
         } else {
-            alert("Geolocation is not supported by your browser or WebView.");
+            alert("Geolocation is not supported by your device.");
         }
         </script>
         """,
         height=0,
     )
-    st.info("🛰️ Querying device GPS satellite hardware... Please confirm prompt.")
 
 # Geocode dynamically when the user types or clicks
 if locate_pressed or (user_search_input and user_search_input != st.session_state.target_area_name):
-    with st.spinner(f"Acquiring satellite coordinates for '{user_search_input}'..."):
-        lat, lon, full_address = geocode_location(user_search_input)
-        if lat and lon:
-            st.session_state.target_lat = lat
-            st.session_state.target_lon = lon
-            st.session_state.target_area_name = user_search_input
-            st.success(f"Locked onto: {full_address[:75]}...")
-        else:
-            st.warning(f"Could not locate '{user_search_input}'. Retaining current coordinates.")
+    lat, lon, full_address = geocode_location(user_search_input)
+    if lat and lon:
+        st.session_state.target_lat = lat
+        st.session_state.target_lon = lon
+        st.session_state.target_area_name = user_search_input
+    else:
+        st.warning(f"Could not locate '{user_search_input}'. Retaining current coordinates.")
 
 st.divider()
 
@@ -501,25 +489,24 @@ st.sidebar.header("🕹️ Area Sensor & Simulation Controls")
 data_mode = st.sidebar.radio(
     "Sensor Input Mode:",
     ["Live Targeted Area Telemetry", "Manual Override Feed", "Automated Ambient Simulation"],
+    key="sim_mode_radio",
 )
 
-# Sliders to configure targeted area conditions
-sim_capacity = st.sidebar.slider("Roadway Capacity (veh/hr)", 100, 500, 260)
-sim_count = st.sidebar.slider("Current Vehicle Count", 0, int(sim_capacity * 1.5), int(sim_capacity * 0.78))
-sim_weather = st.sidebar.selectbox("Local Weather Condition", ["Clear", "Fog", "Rain"])
-sim_incident = st.sidebar.checkbox("Report Incident / Collision Alert", value=False)
-sim_hour = st.sidebar.slider("Observation Hour (0-23)", 0, 23, 18)
+sim_capacity = st.sidebar.slider("Roadway Capacity (veh/hr)", 100, 500, 260, key="slider_cap")
+sim_count = st.sidebar.slider("Current Vehicle Count", 0, int(sim_capacity * 1.5), int(sim_capacity * 0.78), key="slider_count")
+sim_weather = st.sidebar.selectbox("Local Weather Condition", ["Clear", "Fog", "Rain"], key="select_weather")
+sim_incident = st.sidebar.checkbox("Report Incident / Collision Alert", value=False, key="check_incident")
+sim_hour = st.sidebar.slider("Observation Hour (0-23)", 0, 23, 18, key="slider_hour")
 
 if data_mode == "Automated Ambient Simulation":
-    auto_refresh = st.sidebar.checkbox("Enable Live Polling", value=True)
-    refresh_rate = st.sidebar.slider("Refresh Rate (seconds)", 2, 10, 3)
+    auto_refresh = st.sidebar.checkbox("Enable Live Polling", value=True, key="check_auto_refresh")
+    refresh_rate = st.sidebar.slider("Refresh Rate (seconds)", 2, 10, 3, key="slider_refresh_rate")
 
 # ---------------------------------------------------------
 # 8. Dynamic Record Pipeline for the Target Location
 # ---------------------------------------------------------
 now_ts = pd.Timestamp.now().replace(hour=sim_hour, minute=0, second=0)
 
-# 1. Primary Targeted Area Record
 primary_record = {
     "timestamp": now_ts,
     "junction_id": "TARGETED_ZONE",
@@ -534,7 +521,6 @@ primary_record = {
 
 all_records = [primary_record]
 
-# 2. Add realistic ambient peripheral junctions around the targeted coordinates
 np.random.seed(42)
 offsets = [
     (0.012, 0.009, "North Sector Link"),
@@ -603,7 +589,6 @@ st.divider()
 # ---------------------------------------------------------
 map_col, action_col = st.columns([3, 2])
 
-# Build Arrow dataset pointing directly at the searched coordinates
 arrow_data = pd.DataFrame(
     [
         {
@@ -624,7 +609,6 @@ with map_col:
 
     current_slice["pillar_color"] = current_slice["rpi_score"].apply(assign_pillar_color)
 
-    # Focus map camera centered at the searched coordinates
     view_center = pdk.ViewState(
         latitude=float(st.session_state.target_lat),
         longitude=float(st.session_state.target_lon),
@@ -633,7 +617,6 @@ with map_col:
         bearing=15,
     )
 
-    # Standard Traffic Volume Pillars
     column_layer = pdk.Layer(
         "ColumnLayer",
         data=current_slice,
@@ -646,7 +629,6 @@ with map_col:
         auto_highlight=True,
     )
 
-    # DYNAMIC TARGET ARROW (Inverted Cone pointing straight down onto the location)
     arrow_pointer_layer = pdk.Layer(
         "ConeLayer",
         data=arrow_data,
@@ -654,11 +636,10 @@ with map_col:
         get_elevation="elevation",
         elevation_scale=1,
         radius=180,
-        get_color=[255, 0, 55, 240],  # Neon Red Pointer
+        get_color=[255, 0, 55, 240],
         pickable=False,
     )
 
-    # Ground Pulsing Halo for Target Junction
     target_halo_layer = pdk.Layer(
         "ScatterplotLayer",
         data=arrow_data,
@@ -692,7 +673,6 @@ with action_col:
     tab_directives, tab_field_cam = st.tabs(["📋 Dispatch Directives", "📷 On-Scene Camera & Incident Triage"])
 
     with tab_directives:
-        # High-visibility status badge for the searched location
         status_tag = (
             "🔴 CRITICAL"
             if target_row["rpi_score"] >= 60
@@ -751,8 +731,9 @@ with action_col:
         sig_action = st.radio(
             f"Deploy Phase to {st.session_state.target_area_name[:20]}:",
             ["Hold Green Corridor", "Dynamic Adaptive Cycle", "Emergency All-Red Flush", "Manual Officer Control"],
+            key="radio_signal_action",
         )
-        if st.button("Dispatch Phase Signal", use_container_width=True):
+        if st.button("Dispatch Phase Signal", key="btn_dispatch_sig", use_container_width=True):
             st.success(f"Signal command '{sig_action}' deployed to {st.session_state.target_area_name}.")
 
     with tab_field_cam:
@@ -762,15 +743,15 @@ with action_col:
         inc_type = st.selectbox(
             "Incident Classification",
             ["Vehicle Breakdown / Stalled", "Multi-Vehicle Collision", "Waterlogging / Debris", "Illegal Parking Obstruction"],
+            key="select_inc_cat",
         )
-        inc_notes = st.text_input("Officer Quick Observation Notes", placeholder="e.g. Lane 2 blocked, tow truck requested")
+        inc_notes = st.text_input("Officer Quick Observation Notes", placeholder="e.g. Lane 2 blocked, tow truck requested", key="text_inc_notes")
 
-        # HTML5 Hardware Camera Input
-        cam_photo = st.camera_input("📸 Capture Scene Evidence")
+        cam_photo = st.camera_input("📸 Capture Scene Evidence", key="cam_evidence_input")
 
         if cam_photo is not None:
             st.image(cam_photo, caption="Uploaded Live Evidence", use_container_width=True)
-            if st.button("💾 Submit Incident Log to Central HQ", use_container_width=True):
+            if st.button("💾 Submit Incident Log to Central HQ", key="btn_save_incident", use_container_width=True):
                 log_field_incident(
                     st.session_state.username,
                     st.session_state.target_area_name,
@@ -781,7 +762,6 @@ with action_col:
                 )
                 st.success("Incident logged into Command Center database with GPS tag.")
 
-        # Show Recent Field Submissions
         conn = get_db_connection()
         recent_logs = pd.read_sql_query(
             "SELECT timestamp, officer_badge, incident_type, notes FROM field_incidents ORDER BY id DESC LIMIT 3",
