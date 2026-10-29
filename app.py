@@ -72,6 +72,7 @@ st.markdown(
         padding: 0.6rem 1.2rem !important;
         box-shadow: 0 4px 12px rgba(239, 68, 68, 0.35) !important;
         transition: all 0.2s ease-in-out !important;
+        width: 100% !important;
     }
     .stButton > button:hover {
         background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%) !important;
@@ -297,7 +298,7 @@ if not st.session_state.authenticated:
             u_badge = st.text_input("Badge ID / Username", value="officer_admin", key="login_badge")
             u_pwd = st.text_input("Security Key / Password", type="password", value="traffic123", key="login_pwd")
 
-            if st.button("Authorize & Enter Command Center", key="btn_auth_login", use_container_width=True):
+            if st.button("Authorize & Enter Command Center", key="btn_auth_login"):
                 if u_badge and u_pwd:
                     user_match = authenticate_user(u_badge, u_pwd)
                     if user_match:
@@ -321,7 +322,7 @@ if not st.session_state.authenticated:
             new_email = st.text_input("Official Govt Email", key="reg_email")
             new_pwd = st.text_input("Set Security Password", type="password", key="reg_pwd")
 
-            if st.button("Submit Official Registration", key="btn_auth_reg", use_container_width=True):
+            if st.button("Submit Official Registration", key="btn_auth_reg"):
                 if new_badge and new_pwd and new_name:
                     success, msg = register_user(new_badge, new_pwd, new_name, new_dept, new_email)
                     if success:
@@ -402,7 +403,7 @@ with col_head:
     st.caption("Live bottleneck detection, incident triage, and automated resource deployment.")
 with col_prof:
     st.write(f"👮 Officer: **{st.session_state.officer_name or st.session_state.username}**")
-    if st.button("Log Out", key="logout_btn", use_container_width=True):
+    if st.button("Log Out", key="logout_btn"):
         st.session_state.authenticated = False
         st.session_state.username = ""
         st.session_state.officer_name = ""
@@ -420,11 +421,11 @@ with s_col1:
 
 with s_col2:
     st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
-    locate_pressed = st.button("🎯 Locate Target", key="locate_target_btn", use_container_width=True)
+    locate_pressed = st.button("🎯 Locate Target", key="locate_target_btn")
 
 with s_col3:
     st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
-    use_gps_pressed = st.button("📍 Sync My GPS", key="sync_gps_btn", use_container_width=True)
+    use_gps_pressed = st.button("📍 Sync My GPS", key="sync_gps_btn")
 
 # Hardware GPS Receiver logic
 if "gps_lat" in st.query_params and "gps_lon" in st.query_params:
@@ -452,18 +453,22 @@ if use_gps_pressed:
                 function(position) {
                     const lat = position.coords.latitude;
                     const lon = position.coords.longitude;
-                    const url = new URL(window.location.href);
-                    url.searchParams.set("gps_lat", lat);
-                    url.searchParams.set("gps_lon", lon);
-                    window.location.href = url.toString();
+                    try {
+                        const targetUrl = new URL(window.parent.location.href);
+                        targetUrl.searchParams.set("gps_lat", lat);
+                        targetUrl.searchParams.set("gps_lon", lon);
+                        window.parent.location.href = targetUrl.toString();
+                    } catch (e) {
+                        window.location.href = window.location.pathname + "?gps_lat=" + lat + "&gps_lon=" + lon;
+                    }
                 },
                 function(error) {
                     alert("GPS Access Denied or Unavailable: " + error.message);
                 },
-                { enableHighAccuracy: true, timeout: 10000 }
+                { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
             );
         } else {
-            alert("Geolocation is not supported by your device.");
+            alert("Geolocation hardware is not accessible.");
         }
         </script>
         """,
@@ -733,7 +738,7 @@ with action_col:
             ["Hold Green Corridor", "Dynamic Adaptive Cycle", "Emergency All-Red Flush", "Manual Officer Control"],
             key="radio_signal_action",
         )
-        if st.button("Dispatch Phase Signal", key="btn_dispatch_sig", use_container_width=True):
+        if st.button("Dispatch Phase Signal", key="btn_dispatch_sig"):
             st.success(f"Signal command '{sig_action}' deployed to {st.session_state.target_area_name}.")
 
     with tab_field_cam:
@@ -750,8 +755,8 @@ with action_col:
         cam_photo = st.camera_input("📸 Capture Scene Evidence", key="cam_evidence_input")
 
         if cam_photo is not None:
-            st.image(cam_photo, caption="Uploaded Live Evidence", use_container_width=True)
-            if st.button("💾 Submit Incident Log to Central HQ", key="btn_save_incident", use_container_width=True):
+            st.image(cam_photo, caption="Uploaded Live Evidence")
+            if st.button("💾 Submit Incident Log to Central HQ", key="btn_save_incident"):
                 log_field_incident(
                     st.session_state.username,
                     st.session_state.target_area_name,
@@ -771,7 +776,7 @@ with action_col:
 
         if not recent_logs.empty:
             st.markdown("##### 🕒 Recent Field Reports")
-            st.dataframe(recent_logs, use_container_width=True)
+            st.dataframe(recent_logs)
 
 # ---------------------------------------------------------
 # 12. Polling Loop for Live Automated Simulation
