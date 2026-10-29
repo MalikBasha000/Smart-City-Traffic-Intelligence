@@ -1,12 +1,14 @@
 import hashlib
 import sqlite3
 import time
+from datetime import datetime
 from geopy.geocoders import Nominatim
 import numpy as np
 import pandas as pd
 import plotly.express as px
 import pydeck as pdk
 import streamlit as st
+import streamlit.components.v1 as components
 from src.analytics import get_recommendations, process_features
 from src.predictor import train_forecasting_model
 
@@ -125,7 +127,7 @@ st.markdown(
 
 
 # ---------------------------------------------------------
-# 2. SQLite Authentication System (Persistent DB)
+# 2. SQLite Authentication & Hardware Incident DB
 # ---------------------------------------------------------
 def get_db_connection():
     return sqlite3.connect("traffic_users.db", check_same_thread=False)
@@ -146,6 +148,21 @@ def init_db():
             name TEXT,
             dept TEXT,
             email TEXT
+        )
+    """
+    )
+    # Incident photo triage logs table
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS field_incidents (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT,
+            officer_badge TEXT,
+            location_name TEXT,
+            lat REAL,
+            lon REAL,
+            incident_type TEXT,
+            notes TEXT
         )
     """
     )
@@ -199,9 +216,23 @@ def register_user(badge_id: str, password: str, name: str, dept: str, email: str
         return False, "Badge ID / Username already registered. Please choose another."
 
 
+def log_field_incident(officer_badge, loc_name, lat, lon, inc_type, notes):
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute(
+        """
+        INSERT INTO field_incidents (timestamp, officer_badge, location_name, lat, lon, incident_type, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """,
+        (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), officer_badge, loc_name, lat, lon, inc_type, notes),
+    )
+    conn.commit()
+    conn.close()
+
+
 init_db()
 
-# Session State for User Auth & Dynamic Location
+# Session State for User Auth, GPS & Dynamic Location
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 if "username" not in st.session_state:
@@ -214,6 +245,8 @@ if "target_lat" not in st.session_state:
     st.session_state.target_lat = 17.4416
 if "target_lon" not in st.session_state:
     st.session_state.target_lon = 78.4871
+if "camera_active" not in st.session_state:
+    st.session_state.camera_active = False
 
 
 # ---------------------------------------------------------
@@ -230,6 +263,19 @@ def geocode_location(query: str):
     except Exception:
         pass
     return None, None, None
+
+
+@st.cache_data(show_spinner=False)
+def reverse_geocode(lat: float, lon: float):
+    """Converts GPS coordinates back into a human-readable area name."""
+    try:
+        geolocator = Nominatim(user_agent="smart_city_traffic_portal_v2")
+        location = geolocator.reverse(f"{lat}, {lon}", timeout=10)
+        if location:
+            return location.address
+    except Exception:
+        pass
+    return f"GPS Sector ({lat:.4f}, {lon:.4f})"
 
 
 # ---------------------------------------------------------
@@ -368,8 +414,8 @@ with col_prof:
         st.session_state.officer_name = ""
         st.rerun()
 
-# REAL-TIME FREE-FORM LOCATION SEARCH ENGINE
-s_col1, s_col2 = st.columns([3.8, 1.2])
+# REAL-TIME SEARCH + MOBILE GPS HARDWARE LOCATION ROW
+s_col1, s_col2, s_col3 = st.columns([2.8, 1.1, 1.1])
 with s_col1:
     user_search_input = st.text_input(
         "🔍 Type ANY Area / Junction to Track & Point Arrow on Map:",
@@ -382,6 +428,57 @@ with s_col2:
     st.write(" ")
     st.write(" ")
     locate_pressed = st.button("🎯 Locate & Point Arrow", use_container_width=True)
+
+with s_col3:
+    st.write(" ")
+    st.write(" ")
+    use_gps_pressed = st.button("📍 Sync My GPS", help="Use device hardware GPS coordinates", use_container_width=True)
+
+# Hardware GPS Receiver logic via Query Parameters
+query_params = st.query_params
+if "gps_lat" in query_params and "gps_lon" in query_params:
+    try:
+        gps_lat = float(query_params["gps_lat"])
+        gps_lon = float(query_params["gps_lon"])
+        if abs(gps_lat - st.session_state.target_lat) > 0.0001 or abs(gps_lon - st.session_state.target_lon) > 0.0001:
+            st.session_state.target_lat = gps_lat
+            st.session_state.target_lon = gps_lon
+            resolved_address = reverse_geocode(gps_lat, gps_lon)
+            st.session_state.target_area_name = resolved_address
+            # Clear params to avoid loop
+            st.query_params.clear()
+            st.rerun()
+    except Exception:
+        pass
+
+# Trigger browser geolocation when "Sync My GPS" is clicked
+if use_gps_pressed:
+    components.html(
+        """
+        <script>
+        if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(
+                function(position) {
+                    const lat = position.coords.latitude;
+                    const lon = position.coords.longitude;
+                    const url = new URL(window.location.href);
+                    url.searchParams.set("gps_lat", lat);
+                    url.searchParams.set("gps_lon", lon);
+                    window.location.href = url.toString();
+                },
+                function(error) {
+                    alert("GPS Access Denied or Unavailable: " + error.message);
+                },
+                { enableHighAccuracy: true, timeout: 10000 }
+            );
+        } else {
+            alert("Geolocation is not supported by your browser or WebView.");
+        }
+        </script>
+        """,
+        height=0,
+    )
+    st.info("🛰️ Querying device GPS satellite hardware... Please confirm prompt.")
 
 # Geocode dynamically when the user types or clicks
 if locate_pressed or (user_search_input and user_search_input != st.session_state.target_area_name):
@@ -589,73 +686,112 @@ with map_col:
     st.pydeck_chart(deck_map)
 
 # ---------------------------------------------------------
-# 11. Operational Dispatch Directives & Signal Controls
+# 11. Operational Dispatch Directives & Mobile Field Utils
 # ---------------------------------------------------------
 with action_col:
-    st.subheader("📋 Operational Dispatch Directives")
+    tab_directives, tab_field_cam = st.tabs(["📋 Dispatch Directives", "📷 On-Scene Camera & Incident Triage"])
 
-    # High-visibility status badge for the searched location
-    status_tag = (
-        "🔴 CRITICAL"
-        if target_row["rpi_score"] >= 60
-        else ("🟡 ELEVATED" if target_row["rpi_score"] >= 40 else "🟢 OPTIMAL")
-    )
-
-    st.markdown(
-        f"""
-        <div style="background: #1e293b; border-left: 4px solid #ef4444; padding: 12px 14px; border-radius: 6px; margin-bottom: 14px;">
-            <b>🎯 TARGETED SECTOR:</b> {st.session_state.target_area_name}<br>
-            <span style="font-size: 13px; color: #cbd5e1;">Status: <b>{status_tag}</b> | Flow: <b>{target_row['vehicle_count']}/{target_row['road_capacity']} veh</b> | RPI: <b>{target_row['rpi_score']}</b> | 15m Forecast: <b>{target_row['forecast_next_15m']} veh</b></span>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    prioritized_corridors = current_slice.sort_values(by="rpi_score", ascending=False)
-
-    for _, corridor in prioritized_corridors.iterrows():
-        is_focused = corridor["junction_id"] == "TARGETED_ZONE"
-        c_status = (
+    with tab_directives:
+        # High-visibility status badge for the searched location
+        status_tag = (
             "🔴 CRITICAL"
-            if corridor["rpi_score"] >= 60
-            else ("🟡 ELEVATED" if corridor["rpi_score"] >= 40 else "🟢 OPTIMAL")
+            if target_row["rpi_score"] >= 60
+            else ("🟡 ELEVATED" if target_row["rpi_score"] >= 40 else "🟢 OPTIMAL")
         )
 
-        expander_title = (
-            f"{c_status} | {corridor['junction_name']} (RPI: {corridor['rpi_score']}) "
-            f"{'📍 [TARGETED]' if is_focused else ''}"
+        st.markdown(
+            f"""
+            <div style="background: #1e293b; border-left: 4px solid #ef4444; padding: 12px 14px; border-radius: 6px; margin-bottom: 14px;">
+                <b>🎯 TARGETED SECTOR:</b> {st.session_state.target_area_name}<br>
+                <span style="font-size: 13px; color: #cbd5e1;">Status: <b>{status_tag}</b> | Flow: <b>{target_row['vehicle_count']}/{target_row['road_capacity']} veh</b> | RPI: <b>{target_row['rpi_score']}</b> | 15m Forecast: <b>{target_row['forecast_next_15m']} veh</b></span>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
 
-        with st.expander(expander_title, expanded=is_focused):
-            c_flow, c_pred = st.columns(2)
-            c_flow.metric(
-                "Current Flow",
-                f"{corridor['vehicle_count']} / {corridor['road_capacity']} veh",
-            )
-            c_pred.metric(
-                "15-Min Forecast",
-                f"{corridor['forecast_next_15m']} veh",
-                delta=int(corridor["forecast_next_15m"] - corridor["vehicle_count"]),
-                delta_color="inverse",
-            )
-            st.write(
-                f"**Road State:** V/C: {corridor['vc_ratio']} | Weather: {corridor['weather_condition']}"
-            )
-            st.write(
-                f"**Incident Status:** {'🚨 Collision Active' if corridor['accident_reported'] == 1 else 'Normal'}"
-            )
-            st.write("**Recommended Interventions:**")
-            for act in get_recommendations(corridor):
-                st.markdown(f"- {act}")
+        prioritized_corridors = current_slice.sort_values(by="rpi_score", ascending=False)
 
-    st.markdown("---")
-    st.markdown("#### ⚡ Signal Corridor Override")
-    sig_action = st.radio(
-        f"Deploy Phase to {st.session_state.target_area_name[:20]}:",
-        ["Hold Green Corridor", "Dynamic Adaptive Cycle", "Emergency All-Red Flush", "Manual Officer Control"],
-    )
-    if st.button("Dispatch Phase Signal", use_container_width=True):
-        st.success(f"Signal command '{sig_action}' deployed to {st.session_state.target_area_name}.")
+        for _, corridor in prioritized_corridors.iterrows():
+            is_focused = corridor["junction_id"] == "TARGETED_ZONE"
+            c_status = (
+                "🔴 CRITICAL"
+                if corridor["rpi_score"] >= 60
+                else ("🟡 ELEVATED" if corridor["rpi_score"] >= 40 else "🟢 OPTIMAL")
+            )
+
+            expander_title = (
+                f"{c_status} | {corridor['junction_name']} (RPI: {corridor['rpi_score']}) "
+                f"{'📍 [TARGETED]' if is_focused else ''}"
+            )
+
+            with st.expander(expander_title, expanded=is_focused):
+                c_flow, c_pred = st.columns(2)
+                c_flow.metric(
+                    "Current Flow",
+                    f"{corridor['vehicle_count']} / {corridor['road_capacity']} veh",
+                )
+                c_pred.metric(
+                    "15-Min Forecast",
+                    f"{corridor['forecast_next_15m']} veh",
+                    delta=int(corridor["forecast_next_15m"] - corridor["vehicle_count"]),
+                    delta_color="inverse",
+                )
+                st.write(
+                    f"**Road State:** V/C: {corridor['vc_ratio']} | Weather: {corridor['weather_condition']}"
+                )
+                st.write(
+                    f"**Incident Status:** {'🚨 Collision Active' if corridor['accident_reported'] == 1 else 'Normal'}"
+                )
+                st.write("**Recommended Interventions:**")
+                for act in get_recommendations(corridor):
+                    st.markdown(f"- {act}")
+
+        st.markdown("---")
+        st.markdown("#### ⚡ Signal Corridor Override")
+        sig_action = st.radio(
+            f"Deploy Phase to {st.session_state.target_area_name[:20]}:",
+            ["Hold Green Corridor", "Dynamic Adaptive Cycle", "Emergency All-Red Flush", "Manual Officer Control"],
+        )
+        if st.button("Dispatch Phase Signal", use_container_width=True):
+            st.success(f"Signal command '{sig_action}' deployed to {st.session_state.target_area_name}.")
+
+    with tab_field_cam:
+        st.subheader("📷 Mobile Incident Reporting")
+        st.caption("Capture physical bottlenecks, stalled vehicles, or lane hazards directly via phone camera.")
+
+        inc_type = st.selectbox(
+            "Incident Classification",
+            ["Vehicle Breakdown / Stalled", "Multi-Vehicle Collision", "Waterlogging / Debris", "Illegal Parking Obstruction"],
+        )
+        inc_notes = st.text_input("Officer Quick Observation Notes", placeholder="e.g. Lane 2 blocked, tow truck requested")
+
+        # HTML5 Hardware Camera Input
+        cam_photo = st.camera_input("📸 Capture Scene Evidence")
+
+        if cam_photo is not None:
+            st.image(cam_photo, caption="Uploaded Live Evidence", use_container_width=True)
+            if st.button("💾 Submit Incident Log to Central HQ", use_container_width=True):
+                log_field_incident(
+                    st.session_state.username,
+                    st.session_state.target_area_name,
+                    st.session_state.target_lat,
+                    st.session_state.target_lon,
+                    inc_type,
+                    inc_notes,
+                )
+                st.success("Incident logged into Command Center database with GPS tag.")
+
+        # Show Recent Field Submissions
+        conn = get_db_connection()
+        recent_logs = pd.read_sql_query(
+            "SELECT timestamp, officer_badge, incident_type, notes FROM field_incidents ORDER BY id DESC LIMIT 3",
+            conn,
+        )
+        conn.close()
+
+        if not recent_logs.empty:
+            st.markdown("##### 🕒 Recent Field Reports")
+            st.dataframe(recent_logs, use_container_width=True)
 
 # ---------------------------------------------------------
 # 12. Polling Loop for Live Automated Simulation
