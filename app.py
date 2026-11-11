@@ -155,6 +155,30 @@ def init_db():
             last_updated TEXT
         )
     ''')
+
+    # Column integrity check
+    c.execute("PRAGMA table_info(users)")
+    cols = [r[1] for r in c.fetchall()]
+    if "plain_password" not in cols:
+        try:
+            c.execute("ALTER TABLE users ADD COLUMN plain_password TEXT")
+        except Exception:
+            pass
+
+    # Ensure baseline users exist
+    c.execute("SELECT COUNT(*) FROM users")
+    count_val = c.fetchone()[0]
+    if count_val == 0:
+        default_users = [
+            ("TGH-1", hash_password("tony@1"), "Tony Stark", "Secunderabad Traffic Division", "tony@hydpolice.gov.in", "FIELD_OFFICER", "tony@1"),
+            ("officer_admin", hash_password("admin@123"), "Commander Admin", "Secunderabad Traffic Division", "admin@hydpolice.gov.in", "ADMIN", "admin@123")
+        ]
+        c.executemany("""
+            INSERT OR IGNORE INTO users (badge_id, password, name, dept, email, role, plain_password)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, default_users)
+        conn.commit()
+
     conn.commit()
     conn.close()
 
@@ -216,8 +240,20 @@ def log_officer_logout(session_id: int):
     conn.close()
 
 def authenticate_user(badge_id: str, password: str, expected_role: str = None):
+    init_db()
     conn = get_db_connection()
     c = conn.cursor()
+    
+    # Defensive auto-check against empty cloud volumes
+    c.execute("SELECT COUNT(*) FROM users")
+    if c.fetchone()[0] == 0:
+        default_users = [
+            ("TGH-1", hash_password("tony@1"), "Tony Stark", "Secunderabad Traffic Division", "tony@hydpolice.gov.in", "FIELD_OFFICER", "tony@1"),
+            ("officer_admin", hash_password("admin@123"), "Commander Admin", "Secunderabad Traffic Division", "admin@hydpolice.gov.in", "ADMIN", "admin@123")
+        ]
+        c.executemany("INSERT OR IGNORE INTO users VALUES (?, ?, ?, ?, ?, ?, ?)", default_users)
+        conn.commit()
+
     if expected_role:
         c.execute(
             "SELECT name, dept, role FROM users WHERE badge_id = ? AND password = ? AND role = ?",
@@ -235,6 +271,7 @@ def authenticate_user(badge_id: str, password: str, expected_role: str = None):
     return False, None
 
 def enroll_field_officer(badge_id: str, password: str, name: str, dept: str, email: str, creator_badge: str):
+    init_db()
     conn = get_db_connection()
     c = conn.cursor()
     try:
@@ -258,6 +295,7 @@ def enroll_field_officer(badge_id: str, password: str, name: str, dept: str, ema
         return False, f"Badge ID [{badge_id}] is already registered."
 
 def update_field_officer(badge_id: str, name: str, dept: str, email: str, new_password: str):
+    init_db()
     conn = get_db_connection()
     c = conn.cursor()
     if new_password and new_password.strip() and new_password != "••••••••":
@@ -276,6 +314,7 @@ def update_field_officer(badge_id: str, name: str, dept: str, email: str, new_pa
     conn.close()
 
 def delete_field_officer(badge_id: str):
+    init_db()
     conn = get_db_connection()
     c = conn.cursor()
     c.execute("DELETE FROM users WHERE badge_id = ?", (badge_id.strip(),))
@@ -284,6 +323,7 @@ def delete_field_officer(badge_id: str):
     conn.close()
 
 def log_field_incident(officer_badge, loc_name, lat, lon, inc_type, notes, img_path=None):
+    init_db()
     conn = get_db_connection()
     c = conn.cursor()
     c.execute("""
@@ -293,37 +333,7 @@ def log_field_incident(officer_badge, loc_name, lat, lon, inc_type, notes, img_p
     conn.commit()
     conn.close()
 
-
-def get_or_create_signal_state(junction_key: str, junction_name: str):
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute("SELECT cycle_length_sec, green_split_sec, yellow_sec, red_sec, pedestrian_sec, control_mode, last_updated FROM junction_signals WHERE junction_key = ?", (junction_key,))
-    row = c.fetchone()
-    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    if not row:
-        c.execute("""
-            INSERT INTO junction_signals (junction_key, junction_name, cycle_length_sec, green_split_sec, yellow_sec, red_sec, pedestrian_sec, control_mode, last_updated)
-            VALUES (?, ?, 120, 60, 5, 55, 15, 'AUTO', ?)
-        """, (junction_key, junction_name, now_str))
-        conn.commit()
-        conn.close()
-        return {"cycle": 120, "green": 60, "yellow": 5, "red": 55, "ped": 15, "mode": "AUTO", "updated": now_str}
-    conn.close()
-    return {"cycle": row[0], "green": row[1], "yellow": row[2], "red": row[3], "ped": row[4], "mode": row[5], "updated": row[6]}
-
-def update_signal_timing(junction_key: str, cycle: int, green: int, yellow: int, ped: int, mode: str):
-    red = max(5, cycle - green - yellow)
-    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute("""
-        UPDATE junction_signals
-        SET cycle_length_sec = ?, green_split_sec = ?, yellow_sec = ?, red_sec = ?, pedestrian_sec = ?, control_mode = ?, last_updated = ?
-        WHERE junction_key = ?
-    """, (cycle, green, yellow, red, ped, mode, now_str, junction_key))
-    conn.commit()
-    conn.close()
-
+# Module level database bootstrap
 init_db()
 
 # =====================================================================
@@ -971,7 +981,7 @@ if not st.session_state.authenticated:
             with tab_field_login:
                 st.caption("Field Officers & Patrol Units: Enter credentials assigned by Division Admin.")
                 with st.form("field_login_form", clear_on_submit=False):
-                    f_badge = st.text_input("Patrol Badge ID", placeholder="e.g. TPD-101", key="f_login_badge")
+                    f_badge = st.text_input("Patrol Badge ID", placeholder="e.g. TGH-1", key="f_login_badge")
                     f_pwd = st.text_input("Officer Password / Passcode", type="password", placeholder="••••••••", key="f_login_pwd")
                     st.write("")
                     submit_field_login = st.form_submit_button("Enter Field Reporting Deck", use_container_width=True)
@@ -1109,7 +1119,10 @@ def geocode_location(address_str: str):
             return lat, lon, label
     try:
         geolocator = Nominatim(user_agent="smart_traffic_intelligence_secunderabad_v2", timeout=10)
-        loc = geolocator.geocode(address_str, country_codes="in", exactly_one=True)
+        query = address_str.strip()
+        if "india" not in query.lower():
+            query += ", Telangana, India"
+        loc = geolocator.geocode(query, country_codes="in", exactly_one=True)
         if loc:
             return loc.latitude, loc.longitude, loc.address
     except Exception:
@@ -1568,7 +1581,6 @@ with map_col:
         except Exception:
             sig_dict = {}
 
-        # Fallback and mapping for all registered landmarks
         corridor_keys = {pt.get("key", "") for pt in gw_gmap_coords}
         for j_key, (j_lat, j_lon, j_title) in HYD_LANDMARK_COORDS.items():
             s_info = sig_dict.get(j_key, {})
@@ -1679,7 +1691,6 @@ with map_col:
         var junctionSignals = __ALL_SIGNALS_JSON__;
         var junctionMarkers = [];
 
-        // Build pins with live phase colors
         for (var i = 0; i < junctionSignals.length; i++) {
           var jData = junctionSignals[i];
           var marker = new google.maps.Marker({
@@ -1698,7 +1709,6 @@ with map_col:
           junctionMarkers.push({ marker: marker, data: jData, offset: Math.floor(Math.random() * 15) });
         }
 
-        // Live Pin Color Switching Loop (Ticks every 1 second)
         var globalTick = 0;
         setInterval(function() {
           globalTick++;
@@ -1706,7 +1716,6 @@ with map_col:
             var item = junctionMarkers[j];
             var d = item.data;
 
-            // If junction is part of active emergency convoy, hold green
             if (d.in_corridor && __IS_SIM__) {
               item.marker.setIcon({
                 path: google.maps.SymbolPath.CIRCLE,
@@ -1720,19 +1729,18 @@ with map_col:
               continue;
             }
 
-            // Normal phase cycle: Green -> Red -> Blue
             var localTime = (globalTick + item.offset) % d.cycle;
             var currentColor = "#10b981";
             var currentPhase = "🟢 GO (Green)";
 
             if (localTime < d.green) {
-              currentColor = "#10b981"; // GREEN
+              currentColor = "#10b981";
               currentPhase = "🟢 GREEN (" + (d.green - localTime) + "s left)";
             } else if (localTime < (d.green + d.red)) {
-              currentColor = "#ef4444"; // RED
+              currentColor = "#ef4444";
               currentPhase = "🔴 RED (" + ((d.green + d.red) - localTime) + "s left)";
             } else {
-              currentColor = "#3b82f6"; // BLUE / PRIORITY
+              currentColor = "#3b82f6";
               currentPhase = "🔵 BLUE (" + (d.cycle - localTime) + "s left)";
             }
 
@@ -1807,7 +1815,6 @@ with map_col:
                 speedEl.innerText = dynamicSpeed + " km/h";
               }
 
-              // Crossed junctions in corridor revert to standard dynamic color cycling
               for (var k = 0; k < junctionMarkers.length; k++) {
                 if (junctionMarkers[k].data.in_corridor && k < (progressRatio * junctionMarkers.length)) {
                   junctionMarkers[k].data.in_corridor = false;
@@ -1879,7 +1886,6 @@ with map_col:
 
         layers_to_render = [column_layer, arrow_pointer_layer, target_halo_layer]
 
-        # Active Green Wave Overlay on 3D Deck (Synchronized Across All Users via DB)
         active_paths = []
         try:
             conn_gw = get_db_connection()
@@ -2000,8 +2006,6 @@ with action_col:
         
         with col_t2:
             t_blue = st.slider("🔵 Blue Light (Emergency / Priority in seconds):", min_value=0, max_value=60, value=int(sig_data.get("ped", 15)), step=5, key=f"sld_b_{selected_j_key}")
-            
-            # Pure live dynamic calculation
             t_cycle = t_green + t_red + t_blue
             
             st.markdown(f"""
