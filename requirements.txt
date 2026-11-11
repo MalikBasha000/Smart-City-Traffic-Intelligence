@@ -1,7 +1,7 @@
-
-pandas==3.1.0
-requests==2.34.2
-streamlit==1.66.1
-streamlit-js-eval==1.0.0
-
-
+streamlit
+pandas
+requests
+geopy
+scikit-learn
+folium
+streamlit-folium
