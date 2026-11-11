@@ -35,16 +35,19 @@ st.set_page_config(
     page_title="Smart City Traffic Intelligence",
     page_icon="🚦",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 # ---------------------------------------------------------------------
 # GLOBAL ENVIRONMENT & API CONFIGURATION
 # ---------------------------------------------------------------------
+FALLBACK_MAPS_KEY = "AIzaSyBuDSkD5LhAb_lVNXAhO1BaYasIScCwozw"
 try:
-    GOOGLE_MAPS_API_KEY = st.secrets.get("GOOGLE_MAPS_API_KEY", os.environ.get("GOOGLE_MAPS_API_KEY", ""))
+    GOOGLE_MAPS_API_KEY = st.secrets.get("GOOGLE_MAPS_API_KEY", os.environ.get("GOOGLE_MAPS_API_KEY", FALLBACK_MAPS_KEY))
+    if not GOOGLE_MAPS_API_KEY:
+        GOOGLE_MAPS_API_KEY = FALLBACK_MAPS_KEY
 except Exception:
-    GOOGLE_MAPS_API_KEY = os.environ.get("GOOGLE_MAPS_API_KEY", "")
+    GOOGLE_MAPS_API_KEY = os.environ.get("GOOGLE_MAPS_API_KEY", FALLBACK_MAPS_KEY)
 
 # =====================================================================
 # MASTER DIVISIONS & DATABASE LAYER
@@ -156,7 +159,6 @@ def init_db():
         )
     ''')
 
-    # Column integrity check
     c.execute("PRAGMA table_info(users)")
     cols = [r[1] for r in c.fetchall()]
     if "plain_password" not in cols:
@@ -165,7 +167,6 @@ def init_db():
         except Exception:
             pass
 
-    # Ensure baseline users exist
     c.execute("SELECT COUNT(*) FROM users")
     count_val = c.fetchone()[0]
     if count_val == 0:
@@ -244,7 +245,6 @@ def authenticate_user(badge_id: str, password: str, expected_role: str = None):
     conn = get_db_connection()
     c = conn.cursor()
     
-    # Defensive auto-check against empty cloud volumes
     c.execute("SELECT COUNT(*) FROM users")
     if c.fetchone()[0] == 0:
         default_users = [
@@ -333,7 +333,7 @@ def log_field_incident(officer_badge, loc_name, lat, lon, inc_type, notes, img_p
     conn.commit()
     conn.close()
 
-# Module level database bootstrap
+# Bootstrap database
 init_db()
 
 # =====================================================================
@@ -876,15 +876,15 @@ if not st.session_state.authenticated:
       }
       .block-container {
           max-width: 980px !important;
-          padding-top: 3rem !important;
-          padding-bottom: 3rem !important;
+          padding-top: 2rem !important;
+          padding-bottom: 2rem !important;
       }
       .showcase-panel {
           background: linear-gradient(135deg, #091e3a 0%, #2b5876 50%, #4e4376 100%);
           height: 100%;
-          min-height: 520px;
-          border-radius: 22px;
-          padding: 40px 30px;
+          min-height: 480px;
+          border-radius: 20px;
+          padding: 35px 25px;
           display: flex;
           flex-direction: column;
           justify-content: space-between;
@@ -906,15 +906,15 @@ if not st.session_state.authenticated:
           width: fit-content;
       }
       .showcase-title {
-          font-size: 2.1rem;
+          font-size: 1.9rem;
           font-weight: 700;
           line-height: 1.25;
-          margin-top: 25px;
+          margin-top: 20px;
           color: #f8fafc;
       }
       .showcase-desc {
           color: #cbd5e1;
-          font-size: 0.95rem;
+          font-size: 0.92rem;
           margin-top: 12px;
           line-height: 1.5;
       }
@@ -970,16 +970,16 @@ if not st.session_state.authenticated:
 
         with left_col:
             st.markdown("""
-            <div style="padding: 15px 5px 0 5px;">
-                <h1 style="color: #f8fafc; font-size: 2.2rem; font-weight: 800; margin-bottom: 4px;">Authorized Access</h1>
-                <p style="color: #94a3b8; font-size: 0.92rem; margin-bottom: 18px;">Log into Command Network by Operational Clearance</p>
+            <div style="padding: 10px 5px 0 5px;">
+                <h1 style="color: #f8fafc; font-size: 1.9rem; font-weight: 800; margin-bottom: 4px;">Authorized Access</h1>
+                <p style="color: #94a3b8; font-size: 0.88rem; margin-bottom: 16px;">Log into Command Network by Operational Clearance</p>
             </div>
             """, unsafe_allow_html=True)
 
             tab_field_login, tab_admin_login = st.tabs(["👮 Field Patrol Login", "🛡️ Command Admin Login"])
 
             with tab_field_login:
-                st.caption("Field Officers & Patrol Units: Enter credentials assigned by Division Admin.")
+                st.caption("Field Officers: Enter designated badge credentials.")
                 with st.form("field_login_form", clear_on_submit=False):
                     f_badge = st.text_input("Patrol Badge ID", placeholder="e.g. TGH-1", key="f_login_badge")
                     f_pwd = st.text_input("Officer Password / Passcode", type="password", placeholder="••••••••", key="f_login_pwd")
@@ -997,7 +997,7 @@ if not st.session_state.authenticated:
                                 st.session_state.officer_role = "FIELD_OFFICER"
                                 st.session_state.db_session_id = log_officer_login(f_badge, user_data["name"], "FIELD_OFFICER")
                                 set_officer_assigned_location(user_data["dept"])
-                                st.success(f"Duty Session Started: Welcome {user_data['name']} (Assigned: {user_data['dept']})")
+                                st.success(f"Duty Session Started: Welcome {user_data['name']}")
                                 st.rerun()
                             else:
                                 st.error("Invalid Field Officer Badge ID or Password.")
@@ -1005,7 +1005,7 @@ if not st.session_state.authenticated:
                             st.warning("Please enter your Badge ID and Password.")
 
             with tab_admin_login:
-                st.caption("HQ Command Personnel: Full authority to monitor, enroll officers, & verify incidents.")
+                st.caption("HQ Command Personnel: Full authority to monitor, enroll, & verify.")
                 with st.form("admin_login_form", clear_on_submit=False):
                     a_badge = st.text_input("Admin Badge ID", placeholder="e.g. officer_admin", key="a_login_badge")
                     a_pwd = st.text_input("HQ Master Security Key", type="password", placeholder="••••••••", key="a_login_pwd")
@@ -1022,7 +1022,7 @@ if not st.session_state.authenticated:
                                 st.session_state.officer_dept = user_data["dept"]
                                 st.session_state.officer_role = "ADMIN"
                                 st.session_state.db_session_id = log_officer_login(a_badge, user_data["name"], "ADMIN")
-                                st.success("Command Authority Authenticated. Session Logged.")
+                                st.success("Command Authority Authenticated.")
                                 st.rerun()
                             else:
                                 st.error("Invalid Command Admin Credentials.")
@@ -1030,8 +1030,8 @@ if not st.session_state.authenticated:
                             st.warning("Please enter Master Admin credentials.")
 
             st.markdown("""
-            <div style="margin-top: 18px; padding: 10px 14px; background: rgba(30, 41, 59, 0.5); border-radius: 8px; border: 1px solid rgba(148, 163, 184, 0.15); font-size: 0.8rem; color: #94a3b8;">
-                🔒 <b>Notice:</b> Public enrollment is disabled. New patrol officers must be registered directly by a Sector Admin Officer from the HQ Roster.
+            <div style="margin-top: 14px; padding: 10px 12px; background: rgba(30, 41, 59, 0.5); border-radius: 8px; border: 1px solid rgba(148, 163, 184, 0.15); font-size: 0.78rem; color: #94a3b8;">
+                🔒 <b>Notice:</b> Public enrollment is disabled. Contact your Sector Division Admin for clearance credentials.
             </div>
             """, unsafe_allow_html=True)
 
@@ -1053,6 +1053,108 @@ if not st.session_state.authenticated:
             """, unsafe_allow_html=True)
 
     st.stop()
+
+# =====================================================================
+# RESPONSIVE MOBILE CSS & UI ENHANCEMENTS
+# =====================================================================
+
+st.markdown("""
+<style>
+  /* Global Streamlit App Bar Cleaner */
+  header[data-testid="stHeader"] {
+    display: none !important;
+  }
+  #MainMenu, footer {
+    visibility: hidden !important;
+  }
+  
+  /* Desktop defaults */
+  .block-container {
+    max-width: 1300px !important;
+    padding-top: 1.2rem !important;
+    padding-bottom: 2rem !important;
+  }
+  
+  /* Mobile Responsive Viewport (Phones & Small Tablets) */
+  @media (max-width: 768px) {
+    .block-container {
+      padding-top: 0.8rem !important;
+      padding-bottom: 2rem !important;
+      padding-left: 0.6rem !important;
+      padding-right: 0.6rem !important;
+    }
+
+    /* Keep heading compact */
+    h1 {
+      font-size: 1.35rem !important;
+      line-height: 1.2 !important;
+      margin-bottom: 0.1rem !important;
+    }
+    h2 {
+      font-size: 1.2rem !important;
+      margin-top: 0.3rem !important;
+      margin-bottom: 0.2rem !important;
+    }
+    h3 {
+      font-size: 1.05rem !important;
+      margin-top: 0.4rem !important;
+      margin-bottom: 0.2rem !important;
+    }
+    p, span, label, div {
+      font-size: 0.85rem !important;
+    }
+
+    /* Force columns to compact grid instead of giant full-width vertical stacks */
+    div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(4)) {
+      display: grid !important;
+      grid-template-columns: 1fr 1fr !important;
+      gap: 8px !important;
+    }
+    div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(4)) > div[data-testid="column"] {
+      width: 100% !important;
+      min-width: 0 !important;
+      padding: 0 !important;
+    }
+
+    /* Metric card compression */
+    div[data-testid="stMetric"] {
+      background: rgba(30, 41, 59, 0.55);
+      border: 1px solid rgba(148, 163, 184, 0.2);
+      border-radius: 8px;
+      padding: 8px 10px !important;
+    }
+    div[data-testid="stMetricValue"] {
+      font-size: 1.25rem !important;
+      font-weight: 800 !important;
+    }
+    div[data-testid="stMetricLabel"] {
+      font-size: 0.72rem !important;
+      color: #94a3b8 !important;
+    }
+
+    /* Action buttons: compact height */
+    div.stButton button {
+      height: 38px !important;
+      font-size: 0.82rem !important;
+      padding: 2px 8px !important;
+    }
+
+    /* Tighter expanders */
+    div[data-testid="stExpander"] {
+      border-radius: 8px !important;
+      margin-bottom: 6px !important;
+    }
+    div[data-testid="stExpander"] details summary {
+      padding: 8px 10px !important;
+      font-size: 0.84rem !important;
+    }
+    hr {
+      margin-top: 0.5rem !important;
+      margin-bottom: 0.5rem !important;
+    }
+  }
+</style>
+""", unsafe_allow_html=True)
 
 # =====================================================================
 # GEOCODING & TELEMETRY INDEX
@@ -1321,26 +1423,32 @@ def get_recommendations(corridor):
 # =====================================================================
 # PROJECT TITLE HEADER & COMMAND OPERATIONS TOP BAR
 # =====================================================================
-header_col1, header_col2 = st.columns([3, 1.2])
 
-with header_col1:
-    st.title("🚦 Smart City Traffic Intelligence")
-    st.caption(f"Connected as **{st.session_state.get('officer_name', 'Authorized Officer')}** | Role: `{st.session_state.get('officer_role', 'FIELD_OFFICER')}` | Sector: *{st.session_state.get('officer_dept', 'General Command')}*")
+# Responsive Mobile-First Header
+st.markdown(f"""
+<div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4px;">
+  <div>
+    <h2 style="margin: 0; font-size: 1.35rem; font-weight: 800; color: #f8fafc;">🚦 Smart Traffic Intelligence</h2>
+    <div style="font-size: 0.78rem; color: #94a3b8; margin-top: 1px;">
+      <b>{st.session_state.get('officer_name', 'Authorized Officer')}</b> | <code style="font-size: 0.72rem;">{st.session_state.get('officer_role', 'FIELD_OFFICER')}</code> | <i>{st.session_state.get('officer_dept', 'Secunderabad')}</i>
+    </div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
 
-with header_col2:
-    st.write("")
-    btn_portal_col, btn_logout_col = st.columns([1.6, 1])
-    with btn_portal_col:
-        portal_label = "🛡️ HQ Command & Roster" if st.session_state.get("officer_role") == "ADMIN" else "📋 Incident Center"
-        if st.button(portal_label, use_container_width=True):
-            show_incident_triage_dialog()
-    with btn_logout_col:
-        if st.button("🚪 Logout", use_container_width=True):
-            log_officer_logout(st.session_state.get("db_session_id"))
-            st.session_state.authenticated = False
-            st.session_state.username = ""
-            st.session_state.officer_role = ""
-            st.rerun()
+# Compact Action Buttons Aligned Side-by-Side
+btn_portal_col, btn_logout_col = st.columns([2.2, 1])
+with btn_portal_col:
+    portal_label = "🛡️ HQ Command & Roster" if st.session_state.get("officer_role") == "ADMIN" else "📋 Incident Center"
+    if st.button(portal_label, use_container_width=True):
+        show_incident_triage_dialog()
+with btn_logout_col:
+    if st.button("🚪 Logout", use_container_width=True):
+        log_officer_logout(st.session_state.get("db_session_id"))
+        st.session_state.authenticated = False
+        st.session_state.username = ""
+        st.session_state.officer_role = ""
+        st.rerun()
 
 st.markdown("---")
 
@@ -1389,7 +1497,7 @@ curr_val = st.session_state.get("target_area_name", "Alwal, Secunderabad")
 if curr_val not in options_list:
     options_list.insert(0, curr_val)
 
-s_col1, s_col2, s_col3 = st.columns([6, 2, 2])
+s_col1, s_col2, s_col3 = st.columns([5.5, 2.2, 2.2])
 
 with s_col1:
     def on_selection_change():
@@ -1502,14 +1610,15 @@ current_slice["forecast_next_15m"] = current_slice.apply(predict_next_volume, ax
 
 target_row = current_slice[current_slice["junction_id"] == "TARGETED_ZONE"].iloc[0]
 
+# 4 Key Metric KPIs (Styled as a 2x2 Grid on Mobile via CSS)
 col1, col2, col3, col4 = st.columns(4)
-col1.metric("Targeted Area", st.session_state.target_area_name[:24], f"{target_row['vehicle_count']} veh")
+col1.metric("Targeted Area", st.session_state.target_area_name[:18], f"{target_row['vehicle_count']} veh")
 avg_vc = target_row["vc_ratio"]
-col2.metric("Area V/C Saturation", f"{avg_vc:.2f}", delta="Saturated" if avg_vc >= 0.85 else "Stable", delta_color="inverse" if avg_vc >= 0.85 else "normal")
+col2.metric("V/C Saturation", f"{avg_vc:.2f}", delta="Saturated" if avg_vc >= 0.85 else "Stable", delta_color="inverse" if avg_vc >= 0.85 else "normal")
 accidents_count = int(current_slice["accident_reported"].sum())
-col3.metric("Active Incidents", f"{accidents_count} Alert(s)", delta="Collision Reported" if target_row["accident_reported"] == 1 else "Normal Flow", delta_color="inverse" if target_row["accident_reported"] == 1 else "normal")
+col3.metric("Incidents", f"{accidents_count} Alert(s)", delta="Collision" if target_row["accident_reported"] == 1 else "Normal", delta_color="inverse" if target_row["accident_reported"] == 1 else "normal")
 target_rpi = target_row["rpi_score"]
-col4.metric("Area RPI Stress Index", f"{target_rpi:.1f} / 100", delta="High Load" if target_rpi > 60 else "Normal Load", delta_color="inverse" if target_rpi > 60 else "normal")
+col4.metric("RPI Stress", f"{target_rpi:.1f}/100", delta="High" if target_rpi > 60 else "Normal", delta_color="inverse" if target_rpi > 60 else "normal")
 
 st.divider()
 
@@ -1533,8 +1642,8 @@ with map_col:
 
     if map_view_mode in ["Live Google Traffic", "Corridor Simulation"]:
         is_sim = (map_view_mode == "Corridor Simulation")
-        st.subheader("🚑 Live Corridor Transit Simulation" if is_sim else "🗺️ Live Google Traffic Network")
-        st.caption(f"🎯 Center Locked: **{st.session_state.target_area_name}** ({t_lat:.4f}, {t_lon:.4f}) | Real-Time Traffic Layer Active")
+        st.subheader("🚑 Live Corridor Simulation" if is_sim else "🗺️ Live Google Traffic Network")
+        st.caption(f"🎯 Locked: **{st.session_state.target_area_name}** ({t_lat:.4f}, {t_lon:.4f})")
 
         gw_gmap_coords = []
         road_polyline_points = []
@@ -1571,7 +1680,6 @@ with map_col:
         if not road_polyline_points and gw_gmap_coords:
             road_polyline_points = [{"lat": pt["lat"], "lng": pt["lng"]} for pt in gw_gmap_coords]
 
-        # Gather city-wide junction signal profiles from junction_signals SQLite table
         junctions_payload = []
         try:
             conn_sig = get_db_connection()
@@ -1627,19 +1735,19 @@ with map_col:
         grid-template-columns: repeat(4, 1fr);
         background: rgba(15, 23, 42, 0.95);
         border: 1px solid rgba(56, 189, 248, 0.25);
-        border-radius: 10px;
-        padding: 10px 14px;
-        margin-bottom: 10px;
+        border-radius: 8px;
+        padding: 8px 10px;
+        margin-bottom: 8px;
         box-shadow: 0 4px 14px rgba(0,0,0,0.4);
       }
       .hud-card { display: flex; flex-direction: column; }
-      .hud-label { font-size: 11px; color: #94a3b8; text-transform: uppercase; font-weight: 600; letter-spacing: 0.04em; }
-      .hud-value { font-size: 20px; font-weight: 800; color: #38bdf8; margin-top: 2px; }
+      .hud-label { font-size: 10px; color: #94a3b8; text-transform: uppercase; font-weight: 600; }
+      .hud-value { font-size: 16px; font-weight: 800; color: #38bdf8; margin-top: 1px; }
       .hud-badge-green { color: #10b981; }
       #map-container {
         width: 100%;
         height: __MAP_HEIGHT__;
-        border-radius: 12px;
+        border-radius: 10px;
         border: 1px solid rgba(255,255,255,0.08);
       }
     </style>
@@ -1647,20 +1755,20 @@ with map_col:
   <body>
     <div id="hud-panel">
       <div class="hud-card">
-        <span class="hud-label">Est. Arrival (ETA)</span>
-        <span class="hud-value" id="val-eta">__TOTAL_MINS__ Mins</span>
+        <span class="hud-label">ETA</span>
+        <span class="hud-value" id="val-eta">__TOTAL_MINS__m</span>
       </div>
       <div class="hud-card">
-        <span class="hud-label">Remaining Distance</span>
-        <span class="hud-value" id="val-dist">__TOTAL_KM__ km</span>
+        <span class="hud-label">Distance</span>
+        <span class="hud-value" id="val-dist">__TOTAL_KM__km</span>
       </div>
       <div class="hud-card">
-        <span class="hud-label">Convoy Speed</span>
+        <span class="hud-label">Speed</span>
         <span class="hud-value" id="val-speed">48 km/h</span>
       </div>
       <div class="hud-card">
-        <span class="hud-label">Signal Status</span>
-        <span class="hud-value hud-badge-green" id="val-signals">🟢 GREEN WAVE</span>
+        <span class="hud-label">Signal</span>
+        <span class="hud-value hud-badge-green" id="val-signals">🟢 WAVE</span>
       </div>
     </div>
 
@@ -1673,7 +1781,7 @@ with map_col:
           zoom: 12,
           center: centerPos,
           mapTypeId: "roadmap",
-          mapTypeControl: true,
+          mapTypeControl: false,
           streetViewControl: false,
           fullscreenControl: true
         });
@@ -1699,7 +1807,7 @@ with map_col:
             title: jData.title + " | Traffic Light Cycle",
             icon: {
               path: google.maps.SymbolPath.CIRCLE,
-              scale: 8,
+              scale: 7,
               fillColor: "#10b981",
               fillOpacity: 1.0,
               strokeWeight: 2,
@@ -1719,7 +1827,7 @@ with map_col:
             if (d.in_corridor && __IS_SIM__) {
               item.marker.setIcon({
                 path: google.maps.SymbolPath.CIRCLE,
-                scale: 9,
+                scale: 8,
                 fillColor: "#10b981",
                 fillOpacity: 1.0,
                 strokeWeight: 3,
@@ -1746,7 +1854,7 @@ with map_col:
 
             item.marker.setIcon({
               path: google.maps.SymbolPath.CIRCLE,
-              scale: 7,
+              scale: 6,
               fillColor: currentColor,
               fillOpacity: 1.0,
               strokeWeight: 2,
@@ -1762,7 +1870,7 @@ with map_col:
             geodesic: true,
             strokeColor: "#FF1493",
             strokeOpacity: 0.95,
-            strokeWeight: 7,
+            strokeWeight: 6,
             map: map
           });
 
@@ -1779,9 +1887,9 @@ with map_col:
               map: map,
               title: "Convoy Tracking ID: EM-DISPATCH-101",
               label: {
-                text: "🚑 [ID: EM-101]",
+                text: "🚑 [EM-101]",
                 color: "#FFFFFF",
-                fontSize: "12px",
+                fontSize: "11px",
                 fontWeight: "bold"
               },
               zIndex: 9999
@@ -1842,12 +1950,12 @@ with map_col:
             .replace("__TOTAL_KM__", str(route_dist_km))
             .replace("__TOTAL_MINS__", str(route_duration_min))
             .replace("__HUD_DISPLAY__", "grid" if is_sim else "none")
-            .replace("__MAP_HEIGHT__", "460px" if is_sim else "520px")
+            .replace("__MAP_HEIGHT__", "380px" if is_sim else "440px")
         )
-        components.html(google_map_html, height=560)
+        components.html(google_map_html, height=480)
     else:
         st.subheader("🌐 Real-Time 3D Network Map")
-        st.caption(f"🎯 Pointer Arrow Locked: **{st.session_state.target_area_name}** ({t_lat:.4f}, {t_lon:.4f})")
+        st.caption(f"🎯 Locked: **{st.session_state.target_area_name}**")
 
         current_slice["pillar_color"] = current_slice["rpi_score"].apply(assign_pillar_color)
 
@@ -1942,9 +2050,9 @@ with action_col:
     with tab_directives:
         status_tag = "🔴 CRITICAL" if target_row["rpi_score"] >= 60 else ("🟡 ELEVATED" if target_row["rpi_score"] >= 40 else "🟢 OPTIMAL")
         st.markdown(f"""
-        <div style="background: rgba(15, 23, 42, 0.7); border-left: 4px solid #38bdf8; padding: 14px 16px; border-radius: 12px; margin-bottom: 14px; border: 1px solid rgba(56, 189, 248, 0.2);">
+        <div style="background: rgba(15, 23, 42, 0.7); border-left: 4px solid #38bdf8; padding: 10px 14px; border-radius: 10px; margin-bottom: 12px; border: 1px solid rgba(56, 189, 248, 0.2);">
             <b>🎯 TARGETED SECTOR:</b> {st.session_state.target_area_name}<br>
-            <span style="font-size: 13px; color: #94a3b8;">Status: <b>{status_tag}</b> | Flow: <b>{target_row['vehicle_count']}/{target_row['road_capacity']} veh</b> | RPI: <b>{target_row['rpi_score']}</b> | 15m Forecast: <b>{target_row['forecast_next_15m']} veh</b></span>
+            <span style="font-size: 12px; color: #94a3b8;">Status: <b>{status_tag}</b> | Flow: <b>{target_row['vehicle_count']}/{target_row['road_capacity']} veh</b> | RPI: <b>{target_row['rpi_score']}</b> | 15m: <b>{target_row['forecast_next_15m']} veh</b></span>
         </div>
         """, unsafe_allow_html=True)
 
@@ -1956,7 +2064,7 @@ with action_col:
 
             with st.expander(expander_title, expanded=is_focused):
                 c_flow, c_pred = st.columns(2)
-                c_flow.metric("Current Flow", f"{corridor['vehicle_count']} / {corridor['road_capacity']} veh")
+                c_flow.metric("Current Flow", f"{corridor['vehicle_count']}/{corridor['road_capacity']} veh")
                 c_pred.metric("15-Min Forecast", f"{corridor['forecast_next_15m']} veh", delta=int(corridor["forecast_next_15m"] - corridor["vehicle_count"]), delta_color="inverse")
                 st.write(f"**Road State:** V/C: {corridor['vc_ratio']} | Weather: {corridor['weather_condition']}")
                 st.write(f"**Incident Status:** {'🚨 Collision Active' if corridor['accident_reported'] == 1 else 'Normal'}")
@@ -1976,7 +2084,7 @@ with action_col:
 
     with tab_signals:
         st.subheader("🚦 Traffic Signal Light Controls")
-        st.caption("Easily adjust how long each light stays Green, Red, or Blue (Emergency).")
+        st.caption("Adjust Green, Red, or Blue light duration.")
 
         all_j_keys = sorted(list(HYD_JUNCTION_NETWORK.keys()))
         selected_j_key = st.selectbox(
@@ -1990,9 +2098,9 @@ with action_col:
         sig_data = get_or_create_signal_state(selected_j_key, j_label)
 
         st.markdown(f"""
-        <div style="background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(148, 163, 184, 0.25); border-radius: 10px; padding: 12px 16px; margin-bottom: 15px;">
-            <div style="font-size: 16px; font-weight: 700; color: #f8fafc;">Intersection: {j_label}</div>
-            <div style="font-size: 13px; color: #94a3b8; margin-top: 3px;">
+        <div style="background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(148, 163, 184, 0.25); border-radius: 8px; padding: 10px 14px; margin-bottom: 12px;">
+            <div style="font-size: 15px; font-weight: 700; color: #f8fafc;">Intersection: {j_label}</div>
+            <div style="font-size: 12px; color: #94a3b8; margin-top: 2px;">
                 Status: <span style="color: #10b981; font-weight: bold;">🟢 Operational & Synced</span> | Last Updated: {sig_data.get('updated', 'Recently')}
             </div>
         </div>
@@ -2001,25 +2109,25 @@ with action_col:
         col_t1, col_t2 = st.columns(2)
         
         with col_t1:
-            t_green = st.slider("🟢 Green Light (GO Time in seconds):", min_value=10, max_value=180, value=int(sig_data.get("green", 60)), step=5, key=f"sld_g_{selected_j_key}")
-            t_red = st.slider("🔴 Red Light (STOP Time in seconds):", min_value=10, max_value=180, value=int(sig_data.get("red", 50)), step=5, key=f"sld_r_{selected_j_key}")
+            t_green = st.slider("🟢 Green Light (GO):", min_value=10, max_value=180, value=int(sig_data.get("green", 60)), step=5, key=f"sld_g_{selected_j_key}")
+            t_red = st.slider("🔴 Red Light (STOP):", min_value=10, max_value=180, value=int(sig_data.get("red", 50)), step=5, key=f"sld_r_{selected_j_key}")
         
         with col_t2:
-            t_blue = st.slider("🔵 Blue Light (Emergency / Priority in seconds):", min_value=0, max_value=60, value=int(sig_data.get("ped", 15)), step=5, key=f"sld_b_{selected_j_key}")
+            t_blue = st.slider("🔵 Blue Light (Emergency):", min_value=0, max_value=60, value=int(sig_data.get("ped", 15)), step=5, key=f"sld_b_{selected_j_key}")
             t_cycle = t_green + t_red + t_blue
             
             st.markdown(f"""
-            <div style="background: #1e293b; border-radius: 8px; padding: 14px; margin-top: 24px; border-left: 4px solid #38bdf8;">
-                <div style="font-size: 12px; color: #94a3b8; text-transform: uppercase; font-weight: 600;">⏱️ TOTAL CYCLE TIME</div>
-                <div style="font-size: 26px; font-weight: 800; color: #38bdf8;">{t_cycle} Seconds</div>
-                <div style="font-size: 12px; color: #cbd5e1; margin-top: 2px;">(🟢 {t_green}s + 🔴 {t_red}s + 🔵 {t_blue}s)</div>
+            <div style="background: #1e293b; border-radius: 8px; padding: 10px; margin-top: 14px; border-left: 3px solid #38bdf8;">
+                <div style="font-size: 11px; color: #94a3b8; text-transform: uppercase; font-weight: 600;">⏱️ TOTAL CYCLE TIME</div>
+                <div style="font-size: 22px; font-weight: 800; color: #38bdf8;">{t_cycle}s</div>
+                <div style="font-size: 11px; color: #cbd5e1; margin-top: 2px;">(🟢 {t_green}s + 🔴 {t_red}s + 🔵 {t_blue}s)</div>
             </div>
             """, unsafe_allow_html=True)
 
         st.write("")
         if st.button("💾 Save & Apply Lights", key=f"btn_save_sig_{selected_j_key}", use_container_width=True):
             update_signal_timing(selected_j_key, t_cycle, t_green, 5, t_blue, "ACTIVE")
-            st.success(f"Saved for {j_label}: 🟢 {t_green}s | 🔴 {t_red}s | 🔵 {t_blue}s (Total Cycle: {t_cycle}s)")
+            st.success(f"Saved for {j_label}: {t_cycle}s Cycle")
             time.sleep(0.4)
             st.rerun()
 
@@ -2028,11 +2136,11 @@ with action_col:
         simple_table = pd.read_sql_query("""
             SELECT 
                 junction_name AS 'Intersection',
-                green_split_sec AS '🟢 Green (Go)',
-                red_sec AS '🔴 Red (Stop)',
-                pedestrian_sec AS '🔵 Blue (Priority)',
-                cycle_length_sec AS '⏱️ Total Cycle',
-                last_updated AS 'Last Updated'
+                green_split_sec AS '🟢 Green',
+                red_sec AS '🔴 Red',
+                pedestrian_sec AS '🔵 Blue',
+                cycle_length_sec AS '⏱️ Cycle',
+                last_updated AS 'Updated'
             FROM junction_signals 
             ORDER BY last_updated DESC LIMIT 5
         """, conn_sig)
